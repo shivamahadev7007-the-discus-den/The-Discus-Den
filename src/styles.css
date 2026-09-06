@@ -1,0 +1,70 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", serif;
+  --font-sans: "Figtree", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Den water — deep tank, not black */
+  --color-background: #0c1b1e;
+  --color-foreground: #f3eadc;
+  --color-card: #143035;
+  --color-card-foreground: #f3eadc;
+  --color-sidebar: #0f2327;
+  --color-muted: #1a373c;
+  --color-muted-foreground: #a9bfb8;
+  --color-border: #2d5056;
+  /* Lion / king brass */
+  --color-primary: #d4b06a;
+  --color-primary-foreground: #1a1408;
+  --color-secondary: #1e3a3e;
+  --color-secondary-foreground: #e8dfd0;
+  /* Discus turquoise */
+  --color-accent: #6eb8b0;
+  --color-accent-foreground: #0c1b1e;
+  --color-destructive: #c47a72;
+  --color-destructive-foreground: #1a1210;
+  --color-ring: #d4b06a;
+  --color-ok: #7dba8a;
+  --color-chart-1: #d4b06a;
+  --color-chart-2: #3d7a82;
+  --color-chart-3: #c4786a;
+  --color-chart-4: #6eb8b0;
+  --color-chart-in: #3d7a82;
+  --color-chart-out: #d4b06a;
+  --color-chart-profit: #6eb8b0;
+
+  --radius: 0.75rem;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--color-background);
+    background-image: radial-gradient(ellipse 90% 70% at 0% -10%, #1a3a40 0%, transparent 58%);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    body {
+      background-image: none;
+    }
+  }
+}
