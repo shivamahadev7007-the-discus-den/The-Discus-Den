@@ -13,3 +13,6 @@ attachments/
 .grok/preview.log
 .grok/skills/
 *.log
+
+# FE-2 local test compile output
+.tmp-fe2-test/

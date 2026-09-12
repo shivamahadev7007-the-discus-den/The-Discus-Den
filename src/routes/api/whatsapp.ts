@@ -1,13 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { handleFrontDeskMessage } from "@/lib/whatsapp/front-desk";
+import { sendWhatsAppText } from "@/lib/whatsapp/send";
 
 /**
  * WhatsApp Cloud API webhook (TanStack Start / Nitro → Vercel).
- * Same contract as api/whatsapp.ts — Meta verify (GET) + inbound accept (POST).
+ * GET  — Meta hub challenge verification (unchanged)
+ * POST — inbound text → FE-2 front-desk engine → optional Graph reply
  *
  * Env (Vercel; never commit):
  *   WHATSAPP_VERIFY_TOKEN
  *   WHATSAPP_APP_SECRET (optional; X-Hub-Signature-256)
+ *   WHATSAPP_ACCESS_TOKEN + WHATSAPP_PHONE_NUMBER_ID (optional; outbound)
  */
 
 function verifySignature(
@@ -27,6 +31,19 @@ function verifySignature(
   }
 }
 
+type InboundMessage = {
+  from?: string;
+  type?: string;
+  id?: string;
+  text?: { body?: string };
+};
+
+type WebhookValue = {
+  messages?: InboundMessage[];
+  statuses?: Array<{ id?: string; status?: string }>;
+  metadata?: { phone_number_id?: string };
+};
+
 function summarizeInbound(payload: unknown): string {
   try {
     const root = payload as {
@@ -34,11 +51,7 @@ function summarizeInbound(payload: unknown): string {
       entry?: Array<{
         changes?: Array<{
           field?: string;
-          value?: {
-            messages?: Array<{ from?: string; type?: string; id?: string }>;
-            statuses?: Array<{ id?: string; status?: string }>;
-            metadata?: { phone_number_id?: string };
-          };
+          value?: WebhookValue;
         }>;
       }>;
     };
@@ -56,6 +69,29 @@ function summarizeInbound(payload: unknown): string {
   } catch {
     return "unparsed payload";
   }
+}
+
+function extractTextMessages(payload: unknown): Array<{ from: string; text: string; id?: string }> {
+  const out: Array<{ from: string; text: string; id?: string }> = [];
+  try {
+    const root = payload as {
+      entry?: Array<{
+        changes?: Array<{ value?: WebhookValue }>;
+      }>;
+    };
+    for (const entry of root?.entry ?? []) {
+      for (const change of entry?.changes ?? []) {
+        for (const msg of change?.value?.messages ?? []) {
+          if (msg?.type === "text" && msg.from && msg.text?.body) {
+            out.push({ from: msg.from, text: msg.text.body, id: msg.id });
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return out;
 }
 
 async function handleGet(request: Request): Promise<Response> {
@@ -101,6 +137,34 @@ async function handlePost(request: Request): Promise<Response> {
   }
 
   console.log(`[whatsapp-webhook] ${summarizeInbound(parsed)}`);
+
+  // Always acknowledge Meta quickly — process engine + send after parse.
+  // Soft-fail send errors so webhook stays 200.
+  try {
+    const texts = extractTextMessages(parsed);
+    for (const inbound of texts) {
+      const result = handleFrontDeskMessage(inbound.from, inbound.text);
+      console.log(
+        `[whatsapp-front-desk] waId=${inbound.from} outcome=${result.outcome} step=${result.session.step}`,
+      );
+      const sendResult = await sendWhatsAppText({
+        to: inbound.from,
+        body: result.text.replace(/\*\*/g, "*"), // WhatsApp uses single * for bold
+      });
+      if (!sendResult.ok && sendResult.reason !== "missing_credentials") {
+        console.warn(
+          `[whatsapp-front-desk] send soft-fail reason=${sendResult.reason}`,
+        );
+      } else if (!sendResult.ok) {
+        console.log(
+          "[whatsapp-front-desk] outbound skipped (WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID not set)",
+        );
+      }
+    }
+  } catch (err) {
+    console.warn("[whatsapp-front-desk] engine error (soft)", err);
+  }
+
   return Response.json({ ok: true });
 }
 
