@@ -5,6 +5,11 @@ import {
   resetSessions,
   getSession,
   runScript,
+  ingestInboundText,
+  flushBurst,
+  peekBurstParts,
+  BURST_COALESCE_MS,
+  collectShipStates,
 } from "./front-desk.ts";
 
 beforeEach(() => {
@@ -33,6 +38,24 @@ describe("FE-2 price gate", () => {
     assert.equal(r.outcome, "SOFT_FAIL");
     assert.match(r.text, /state/i);
     assert.doesNotMatch(r.text, /₹\d|rs\.?\s*\d/i);
+  });
+
+  it("TC-04: price-only then refuse qualify → HARD_FAIL (§4[B])", () => {
+    const soft = handleFrontDeskMessage("wa4", "Price list? Cheapest?");
+    assert.equal(soft.outcome, "SOFT_FAIL");
+    assert.equal(getSession("wa4").priceSoftOffered, true);
+    const hard = handleFrontDeskMessage(
+      "wa4",
+      "Just give me the price, I won't answer state questions",
+    );
+    assert.equal(hard.outcome, "HARD_FAIL");
+    assert.equal(getSession("wa4").closed, true);
+  });
+
+  it("TC-04b: price soft then price-only again → HARD_FAIL", () => {
+    handleFrontDeskMessage("wa4b", "rate card?");
+    const hard = handleFrontDeskMessage("wa4b", "only price please");
+    assert.equal(hard.outcome, "HARD_FAIL");
   });
 
   it("qualified then exact price → ESCALATE (no bot price)", () => {
@@ -88,10 +111,13 @@ describe("FE-2 location gate", () => {
     assert.equal(getSession("wa10").shipState, "AP");
   });
 
-  it("TC-20: Dubai → HARD_FAIL", () => {
+  it("TC-20: Ship to Dubai? → HARD_FAIL before shipping FAQ CONTINUE", () => {
     handleFrontDeskMessage("wa20", "hi");
     const r = handleFrontDeskMessage("wa20", "Ship to Dubai?");
     assert.equal(r.outcome, "HARD_FAIL");
+    assert.match(r.text, /Tamil Nadu|Kerala|Karnataka/);
+    // Must not be the shipping/DOA FAQ stub
+    assert.doesNotMatch(r.text, /DOA handling|packing and DOA/i);
   });
 
   it("TC-11: vague South India → clarify then ESCALATE", () => {
@@ -144,8 +170,18 @@ describe("FE-2 experience / tank / seriousness", () => {
       "Kerala",
       "yes kept discus before",
     ]);
+    assert.equal(getSession("wa13").tankOk, undefined);
     const r = handleFrontDeskMessage("wa13", "Tank not bought yet, no heater");
     assert.equal(r.outcome, "SOFT_FAIL");
+  });
+
+  it("TC-13b: bare yes in experience line must not set tankOk", () => {
+    handleFrontDeskMessage("wa13b", "want discus");
+    handleFrontDeskMessage("wa13b", "TN");
+    handleFrontDeskMessage("wa13b", "yes I have kept discus before");
+    assert.equal(getSession("wa13b").experienceOk, true);
+    assert.equal(getSession("wa13b").tankOk, undefined);
+    assert.equal(getSession("wa13b").step, "tank");
   });
 
   it("TC-14: club / reseller → ESCALATE", () => {
@@ -235,5 +271,69 @@ describe("FE-2 FAQ stubs", () => {
     handleFrontDeskMessage("b", "Price list?");
     assert.equal(getSession("a").step, "intent");
     assert.equal(getSession("b").step, "location");
+  });
+});
+
+describe("FE-2 state conflict (TC-36)", () => {
+  it("TC-36: TN and Kerala in one utterance → CONTINUE clarify, do not pick first", () => {
+    handleFrontDeskMessage("wa36", "want discus");
+    const r = handleFrontDeskMessage(
+      "wa36",
+      "I'm in TN wait Kerala",
+    );
+    assert.equal(r.outcome, "CONTINUE");
+    assert.match(r.text, /more than one|which.*one.*state|exact state|get your shipping state right/i);
+    assert.equal(getSession("wa36").shipState, undefined);
+    // collectShipStates sees both
+    const found = collectShipStates("I'm in TN wait Kerala");
+    assert.ok(found.includes("TN") && found.includes("KL"));
+  });
+
+  it("TC-36b: conflicting cities/states never auto-pick first alias", () => {
+    handleFrontDeskMessage("wa36b", "stock");
+    const r = handleFrontDeskMessage("wa36b", "Chennai or Kochi which is fine");
+    assert.equal(r.outcome, "CONTINUE");
+    assert.equal(getSession("wa36b").shipState, undefined);
+  });
+});
+
+describe("FE-2 burst coalesce (TC-35)", () => {
+  it("documents BURST_COALESCE_MS within ~8–15s", () => {
+    assert.ok(BURST_COALESCE_MS >= 8_000 && BURST_COALESCE_MS <= 15_000);
+  });
+
+  it("TC-35: hi + Chennai + kept discus within window → one combined fill, ask tank", async () => {
+    const replies: ReturnType<typeof handleFrontDeskMessage>[] = [];
+    const p = ingestInboundText("wa35", "hi", {
+      coalesceMs: 40,
+      onReply: (r) => {
+        replies.push(r);
+      },
+    });
+    ingestInboundText("wa35", "Chennai", { coalesceMs: 40 });
+    ingestInboundText("wa35", "kept discus 2 yrs", { coalesceMs: 40 });
+    assert.deepEqual(peekBurstParts("wa35"), [
+      "hi",
+      "Chennai",
+      "kept discus 2 yrs",
+    ]);
+    const flushed = flushBurst("wa35");
+    assert.ok(flushed);
+    await p;
+    assert.equal(replies.length, 1);
+    assert.equal(getSession("wa35").shipState, "TN");
+    assert.equal(getSession("wa35").experienceOk, true);
+    assert.match(flushed!.text, /tank|cycled|group|heater/i);
+    assert.equal(flushed!.outcome, "CONTINUE");
+  });
+
+  it("TC-35+36: burst with TN then Kerala → one clarify, no shipState", async () => {
+    const p = ingestInboundText("wa3536", "I'm in TN", { coalesceMs: 40 });
+    ingestInboundText("wa3536", "wait Kerala", { coalesceMs: 40 });
+    const flushed = flushBurst("wa3536");
+    await p;
+    assert.equal(flushed!.outcome, "CONTINUE");
+    assert.equal(getSession("wa3536").shipState, undefined);
+    assert.match(flushed!.text, /more than one|which.*one.*state|shipping state right/i);
   });
 });

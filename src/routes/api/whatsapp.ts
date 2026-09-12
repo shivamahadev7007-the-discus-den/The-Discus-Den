@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { handleFrontDeskMessage } from "@/lib/whatsapp/front-desk";
+import { ingestInboundText } from "@/lib/whatsapp/front-desk";
 import { sendWhatsAppText } from "@/lib/whatsapp/send";
 
 /**
@@ -142,24 +142,33 @@ async function handlePost(request: Request): Promise<Response> {
   // Soft-fail send errors so webhook stays 200.
   try {
     const texts = extractTextMessages(parsed);
+    // Burst coalesce (~8–15s / BURST_COALESCE_MS): buffer same waId, one reply on flush.
+    // Webhook still ACKs Meta immediately; send runs once per coalesced burst via onReply.
     for (const inbound of texts) {
-      const result = handleFrontDeskMessage(inbound.from, inbound.text);
-      console.log(
-        `[whatsapp-front-desk] waId=${inbound.from} outcome=${result.outcome} step=${result.session.step}`,
-      );
-      const sendResult = await sendWhatsAppText({
-        to: inbound.from,
-        body: result.text.replace(/\*\*/g, "*"), // WhatsApp uses single * for bold
+      void ingestInboundText(inbound.from, inbound.text, {
+        onReply: async (result) => {
+          console.log(
+            `[whatsapp-front-desk] waId=${inbound.from} outcome=${result.outcome} step=${result.session.step}`,
+          );
+          try {
+            const sendResult = await sendWhatsAppText({
+              to: inbound.from,
+              body: result.text.replace(/\*\*/g, "*"), // WhatsApp uses single * for bold
+            });
+            if (!sendResult.ok && sendResult.reason !== "missing_credentials") {
+              console.warn(
+                `[whatsapp-front-desk] send soft-fail reason=${sendResult.reason}`,
+              );
+            } else if (!sendResult.ok) {
+              console.log(
+                "[whatsapp-front-desk] outbound skipped (WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID not set)",
+              );
+            }
+          } catch (sendErr) {
+            console.warn("[whatsapp-front-desk] send error (soft)", sendErr);
+          }
+        },
       });
-      if (!sendResult.ok && sendResult.reason !== "missing_credentials") {
-        console.warn(
-          `[whatsapp-front-desk] send soft-fail reason=${sendResult.reason}`,
-        );
-      } else if (!sendResult.ok) {
-        console.log(
-          "[whatsapp-front-desk] outbound skipped (WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID not set)",
-        );
-      }
     }
   } catch (err) {
     console.warn("[whatsapp-front-desk] engine error (soft)", err);

@@ -28,6 +28,8 @@ export type FrontDeskSession = {
   tankOk?: boolean;
   seriousnessOk?: boolean;
   softFailCount: number;
+  /** Soft price-gate already offered; further price-refuse → HARD_FAIL (§4[B] / TC-04). */
+  priceSoftOffered: boolean;
   offTopicCount: number;
   emptyNudgeCount: number;
   locationClarifyCount: number;
@@ -93,6 +95,7 @@ const sessions = new Map<string, FrontDeskSession>();
 
 export function resetSessions(): void {
   sessions.clear();
+  resetBursts();
 }
 
 export function getSession(waId: string): FrontDeskSession {
@@ -102,6 +105,7 @@ export function getSession(waId: string): FrontDeskSession {
       waId,
       step: "greet",
       softFailCount: 0,
+      priceSoftOffered: false,
       offTopicCount: 0,
       emptyNudgeCount: 0,
       locationClarifyCount: 0,
@@ -194,6 +198,13 @@ function isPriceOnly(t: string): boolean {
   return /\b(price|rate|cost|cheapest|rate\s*card|how\s*much|quote|₹|rs\.?)\b/i.test(t);
 }
 
+/** Explicit refuse to answer qualify questions (after soft price gate) — TC-04 / §4[B]. */
+function isQualifyRefuse(t: string): boolean {
+  return /\b(just\s+(give\s+)?(me\s+)?(the\s+)?price|only\s+(want\s+)?(the\s+)?price|price\s+only|don'?t\s+(want\s+to\s+)?(answer|share|give|say)|won'?t\s+(answer|share|say)|not\s+(telling|sharing)|skip\s+(the\s+)?(questions?|qualify)|no\s+(state|location|details)|refuse)\b/i.test(
+    t,
+  );
+}
+
 function isVipOrEscalateIntent(t: string): boolean {
   return /\b(vip|bulk|club|reseller|wholesale|media|complaint|prior\s+order|last\s+order|issue|hold\s+these|farm\s+visit|visit\s+the\s+farm|pickup)\b/i.test(
     t,
@@ -239,27 +250,54 @@ function isShippingFaq(t: string): boolean {
   return /\b(ship|shipping|doa|delivery|pack(ing)?)\b/i.test(t);
 }
 
-function parseShipState(t: string): ShipState | "outside" | "unclear" | null {
-  const n = norm(t);
+function isOutsideShipMention(n: string): boolean {
+  return /\b(dubai|mumbai|delhi|pune|kolkata|abroad|usa|uk|singapore|malaysia|goa|rajasthan|gujarat|punjab|odisha|bihar)\b/.test(
+    n,
+  );
+}
 
-  // Explicit abroad / outside
-  if (/\b(dubai|mumbai|delhi|pune|kolkata|abroad|usa|uk|singapore|malaysia|goa|rajasthan|gujarat|punjab|odisha|bihar)\b/.test(n)) {
-    return "outside";
-  }
+/** Collect distinct in-region ship states mentioned (word-safe for 2-letter codes). */
+export function collectShipStates(t: string): ShipState[] {
+  const n = norm(t);
+  const found: ShipState[] = [];
+  const add = (code: ShipState) => {
+    if (!found.includes(code)) found.push(code);
+  };
 
   for (const [alias, code] of Object.entries(STATE_ALIASES)) {
-    if (n === alias || n.includes(alias) || new RegExp(`\\b${alias}\\b`).test(n)) {
-      return code;
+    // Short codes (tn, kl, …): word-boundary only — avoid "asdfghjkl" → KL
+    if (alias.length <= 2) {
+      if (new RegExp(`\\b${alias}\\b`, "i").test(n)) add(code);
+    } else if (n === alias || n.includes(alias)) {
+      add(code);
     }
   }
   for (const [city, code] of Object.entries(CITY_TO_STATE)) {
-    if (n.includes(city) || new RegExp(`\\b${city}\\b`).test(n)) {
-      return code;
-    }
+    if (n.includes(city) || new RegExp(`\\b${city}\\b`).test(n)) add(code);
+  }
+  return found;
+}
+
+/**
+ * Parse shipping region from text.
+ * - outside: foreign / non-served Indian destinations (beats shipping FAQ)
+ * - conflict: ≥2 distinct in-region states in one utterance (TC-36) → clarify, do not pick first
+ */
+function parseShipState(
+  t: string,
+): ShipState | "outside" | "unclear" | "conflict" | null {
+  const n = norm(t);
+
+  // Explicit abroad / outside — checked before FAQ / in-region aliases
+  if (isOutsideShipMention(n)) {
+    return "outside";
   }
 
+  const found = collectShipStates(t);
+  if (found.length > 1) return "conflict";
+  if (found.length === 1) return found[0]!;
+
   if (/\b(south(\s+india)?|near\s+chennai|somewhere)\b/.test(n) && !CITY_TO_STATE[n]) {
-    // "near Chennai" without state — still TN via city? "near chennai" has chennai
     if (n.includes("chennai")) return "TN";
     return "unclear";
   }
@@ -352,6 +390,10 @@ const TEXTS = {
     "Here’s our current stock share framing: we’ll send the **list + videos** on this chat. **The Discus Den** places orders from this set only — when you’re ready, tell us which of these you’d like.",
   softPrice:
     "Thanks for asking. We don’t publish a rate card here or on the site — once we know your state and setup, Shiva can quote properly. Which state are you in?",
+  priceRefuseHard:
+    "Thank you for your interest in **The Discus Den**. Without a quick sense of your state and setup we can’t quote properly here — we’ll leave it for now. Whenever you’re ready to share those details for a discus enquiry, message us again and we’ll be glad to help.",
+  stateConflictClarify:
+    "Thanks — I want to get your shipping state right. You mentioned more than one. Which **one** state should we use: Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, or Telangana?",
   outsideShip: `Thank you so much for your interest in **The Discus Den**. At present we only arrange shipping within Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, and Telangana. You’re very welcome to browse ${SITE} anytime; we’re just not able to fulfil delivery outside these states right now. If that ever changes, we’d be glad to hear from you again.`,
   beginnerSoft:
     "Appreciate you writing in. Discus reward a stable tank and usually do best in a small group (often 5–6+), in warm, clean water. When your system is ready for that, please message us again — we’ll be happy to help you get set up right.",
@@ -394,7 +436,13 @@ const TEXTS = {
 function fillFromMessage(session: FrontDeskSession, t: string): Partial<FrontDeskSession> {
   const patch: Partial<FrontDeskSession> = {};
   const state = parseShipState(t);
-  if (state && state !== "outside" && state !== "unclear" && !session.shipState) {
+  if (
+    state &&
+    state !== "outside" &&
+    state !== "unclear" &&
+    state !== "conflict" &&
+    !session.shipState
+  ) {
     patch.shipState = state;
   }
   const exp = experienceSignal(t);
@@ -509,15 +557,31 @@ export function handleFrontDeskMessage(waId: string, rawText: string): FrontDesk
     });
   }
 
-  // Price-only early: soft gate → ask location (never quote)
-  if (isPriceOnly(t) && session.step !== "stock" && !session.seriousnessOk) {
+  // Price-only early: soft gate → ask location (never quote). §4[B] / TC-04:
+  // after one soft step, refuse-to-qualify / price-only again → HARD_FAIL.
+  if (
+    (isPriceOnly(t) || (session.priceSoftOffered && isQualifyRefuse(t))) &&
+    session.step !== "stock" &&
+    !session.seriousnessOk
+  ) {
     // If already deep in tree and asking exact price after qualify → escalate
     if (session.shipState && session.experienceOk && session.tankOk) {
       return reply(session, TEXTS.escalateAck, "ESCALATE");
     }
+    // Soft already offered and still price-only / refuse qualify → HARD_FAIL
+    if (
+      session.priceSoftOffered &&
+      (isPriceOnly(t) || isQualifyRefuse(t)) &&
+      !session.shipState
+    ) {
+      return reply(session, TEXTS.priceRefuseHard, "HARD_FAIL", {
+        softFailCount: session.softFailCount + 1,
+      });
+    }
     return reply(session, TEXTS.softPrice, "SOFT_FAIL", {
       step: "location",
       softFailCount: session.softFailCount + 1,
+      priceSoftOffered: true,
     });
   }
 
@@ -548,6 +612,13 @@ export function handleFrontDeskMessage(waId: string, rawText: string): FrontDesk
     if (st === "outside") {
       return reply(merged, TEXTS.outsideShip, "HARD_FAIL", multi);
     }
+    if (st === "conflict") {
+      return reply(merged, TEXTS.stateConflictClarify, "CONTINUE", {
+        ...multi,
+        locationClarifyCount: Math.max(1, session.locationClarifyCount),
+        step: "location",
+      });
+    }
     if (st === "unclear") {
       return reply(merged, TEXTS.askLocationClarify, "CONTINUE", {
         ...multi,
@@ -568,6 +639,14 @@ export function handleFrontDeskMessage(waId: string, rawText: string): FrontDesk
     if (st === "outside") {
       return reply(session, TEXTS.outsideShip, "HARD_FAIL");
     }
+    // Conflicting in-region states before shipState is locked (TC-36)
+    if (st === "conflict" && !session.shipState) {
+      const c = session.locationClarifyCount + 1;
+      return reply(session, TEXTS.stateConflictClarify, "CONTINUE", {
+        step: "location",
+        locationClarifyCount: c,
+      });
+    }
   }
 
   // --- Step machine ---
@@ -582,6 +661,28 @@ export function handleFrontDeskMessage(waId: string, rawText: string): FrontDesk
       const st = parseShipState(t);
       if (st === "outside") {
         return reply(session, TEXTS.outsideShip, "HARD_FAIL");
+      }
+      // TC-36: conflicting states in one utterance — warm clarify, do not pick first
+      if (st === "conflict") {
+        const c = session.locationClarifyCount + 1;
+        if (c >= 2) {
+          return reply(session, TEXTS.escalateAck, "ESCALATE", {
+            locationClarifyCount: c,
+          });
+        }
+        return reply(session, TEXTS.stateConflictClarify, "CONTINUE", {
+          locationClarifyCount: c,
+        });
+      }
+      // After soft price gate: still refusing to give a state → HARD_FAIL (TC-04)
+      if (
+        (st === "unclear" || st === null) &&
+        session.priceSoftOffered &&
+        (isPriceOnly(t) || isQualifyRefuse(t))
+      ) {
+        return reply(session, TEXTS.priceRefuseHard, "HARD_FAIL", {
+          softFailCount: session.softFailCount + 1,
+        });
       }
       if (st === "unclear" || st === null) {
         const c = session.locationClarifyCount + 1;
@@ -718,4 +819,130 @@ export function runScript(
   messages: string[],
 ): FrontDeskReply[] {
   return messages.map((m) => handleFrontDeskMessage(waId, m));
+}
+
+// ---------------------------------------------------------------------------
+// Burst coalesce (doc §4 / TC-35)
+// ---------------------------------------------------------------------------
+
+/**
+ * Coalesce window for same-waId rapid inbound texts.
+ * Spec: ~8–15 seconds (or until pause). Midpoint used as default.
+ */
+export const BURST_COALESCE_MS = 12_000;
+
+type BurstState = {
+  parts: string[];
+  timer: ReturnType<typeof setTimeout> | null;
+  /** Single shared promise for this burst — resolved once on flush. */
+  deferred: Promise<FrontDeskReply>;
+  resolve: (reply: FrontDeskReply) => void;
+  /** onReply callbacks — invoked exactly once when the burst flushes. */
+  listeners: Array<(reply: FrontDeskReply) => void | Promise<void>>;
+};
+
+const bursts = new Map<string, BurstState>();
+
+export function resetBursts(): void {
+  for (const b of bursts.values()) {
+    if (b.timer) clearTimeout(b.timer);
+  }
+  bursts.clear();
+}
+
+function flushBurstNow(waId: string): void {
+  const state = bursts.get(waId);
+  if (!state) return;
+  if (state.timer) clearTimeout(state.timer);
+  bursts.delete(waId);
+  const combined = state.parts
+    .map((p) => (p ?? "").trim())
+    .filter((p) => p.length > 0)
+    .join("\n");
+  const reply = handleFrontDeskMessage(waId, combined);
+  state.resolve(reply);
+  for (const listener of state.listeners) {
+    try {
+      void listener(reply);
+    } catch {
+      // soft — webhook send errors handled by caller
+    }
+  }
+}
+
+/**
+ * Buffer rapid inbound texts for the same waId and process as one combined
+ * message after {@link BURST_COALESCE_MS} (or opts.coalesceMs).
+ *
+ * - Returns a Promise that resolves with the single coalesced reply.
+ * - `onReply` (if provided) is called **once** when the burst flushes — use
+ *   this in the webhook so outbound send is not duplicated.
+ * - Pass `coalesceMs: 0` (or negative) to process immediately (tests / bypass).
+ */
+export function ingestInboundText(
+  waId: string,
+  rawText: string,
+  opts?: {
+    coalesceMs?: number;
+    onReply?: (reply: FrontDeskReply) => void | Promise<void>;
+  },
+): Promise<FrontDeskReply> {
+  const ms = opts?.coalesceMs ?? BURST_COALESCE_MS;
+  if (ms <= 0) {
+    const reply = handleFrontDeskMessage(waId, rawText);
+    if (opts?.onReply) void opts.onReply(reply);
+    return Promise.resolve(reply);
+  }
+
+  let state = bursts.get(waId);
+  if (!state) {
+    let resolve!: (reply: FrontDeskReply) => void;
+    const deferred = new Promise<FrontDeskReply>((r) => {
+      resolve = r;
+    });
+    state = {
+      parts: [],
+      timer: null,
+      deferred,
+      resolve,
+      listeners: [],
+    };
+    bursts.set(waId, state);
+  }
+
+  state.parts.push(rawText ?? "");
+  if (opts?.onReply) state.listeners.push(opts.onReply);
+
+  if (state.timer) clearTimeout(state.timer);
+  state.timer = setTimeout(() => flushBurstNow(waId), ms);
+
+  return state.deferred;
+}
+
+/** Force-flush a pending burst (tests). Returns the coalesced reply, or undefined. */
+export function flushBurst(waId: string): FrontDeskReply | undefined {
+  const state = bursts.get(waId);
+  if (!state) return undefined;
+  const combined = state.parts
+    .map((p) => (p ?? "").trim())
+    .filter((p) => p.length > 0)
+    .join("\n");
+  if (state.timer) clearTimeout(state.timer);
+  bursts.delete(waId);
+  const replyResult = handleFrontDeskMessage(waId, combined);
+  state.resolve(replyResult);
+  for (const listener of state.listeners) {
+    try {
+      void listener(replyResult);
+    } catch {
+      // soft
+    }
+  }
+  return replyResult;
+}
+
+/** Peek buffered parts for a waId (tests). */
+export function peekBurstParts(waId: string): string[] | undefined {
+  const s = bursts.get(waId);
+  return s ? [...s.parts] : undefined;
 }
