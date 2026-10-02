@@ -1,5 +1,5 @@
 {
- "about": "Every chat prompt from Kiara's QA runs on 2 Oct 2026 (first run at 7a13967, re-test at aa1b371, round 3 at ca59363), replayed in order per session, with the expected answer-pack id of each reply (faq-id.ts). Catalog = parsed copy of the live pages at 19:59 IST. Sanitised: the first-time code word is replaced by a fake code and no real phone numbers are included.",
+ "about": "Every chat prompt from Kiara's QA runs on 2 Oct 2026 (first run at 7a13967, re-test at aa1b371, round 3 at ca59363), replayed in order per session, with the expected answer-pack id of each reply (faq-id.ts). Catalog = parsed copy of the live pages at 19:59 IST. Sanitised: the first-time code word is replaced by a fake code and no real phone numbers are included. Stock = the counts the live site listed at 00:05 IST on 3 Oct (qty cap per card); C1 stock turns re-pinned from internal to C1 stock under the 3 Oct rule.",
  "catalog": {
   "strains": [
    {
@@ -8,7 +8,8 @@
     "description": "Red body. White face. A bluish rim on the fin edges.",
     "price": 3250,
     "priceText": "₹3,250",
-    "available": true
+    "available": true,
+    "stock": 15
    },
    {
     "name": "Blue Diamonds (Big)",
@@ -16,7 +17,8 @@
     "description": "Electric blue. The Den classic.",
     "price": 3750,
     "priceText": "₹3,750",
-    "available": true
+    "available": true,
+    "stock": 25
    },
    {
     "name": "Red Panda Eagles",
@@ -24,7 +26,8 @@
     "description": "Warm red with fine white spotting. Den-raised.",
     "price": 4250,
     "priceText": "₹4,250",
-    "available": true
+    "available": true,
+    "stock": 15
    },
    {
     "name": "Yellow Panda Eagles",
@@ -32,7 +35,8 @@
     "description": "Warm gold with fine white spotting. Den-raised.",
     "price": 3250,
     "priceText": "₹3,250",
-    "available": true
+    "available": true,
+    "stock": 20
    },
    {
     "name": "Marlboro Red Discus",
@@ -40,7 +44,8 @@
     "description": "Solid orange-red. Even colour. Den-raised.",
     "price": 2500,
     "priceText": "₹2,500",
-    "available": true
+    "available": true,
+    "stock": 8
    },
    {
     "name": "White Butterfly Discus",
@@ -48,7 +53,8 @@
     "description": "White body. Soft blue rim. Fine red striations.",
     "price": 2800,
     "priceText": "₹2,800",
-    "available": true
+    "available": true,
+    "stock": 20
    },
    {
     "name": "Blue Diamonds (Small)",
@@ -56,7 +62,8 @@
     "description": "Metallic cobalt shine. The small Den classic.",
     "price": 1100,
     "priceText": "₹1,100",
-    "available": true
+    "available": true,
+    "stock": 25
    },
    {
     "name": "Red Checkerboards",
@@ -64,7 +71,8 @@
     "description": "Red netting. Tight checks. Den-raised.",
     "price": 2250,
     "priceText": "₹2,250",
-    "available": true
+    "available": true,
+    "stock": 20
    },
    {
     "name": "Yellow Diamonds",
@@ -72,7 +80,8 @@
     "description": "Lemon yellow. Exotic and beautiful.",
     "price": 850,
     "priceText": "₹850",
-    "available": true
+    "available": true,
+    "stock": 25
    },
    {
     "name": "Tiger Turquoise",
@@ -80,7 +89,8 @@
     "description": "Chennai-raised. Stripes coming in hard.",
     "price": 3500,
     "priceText": "₹3,500",
-    "available": true
+    "available": true,
+    "stock": 20
    },
    {
     "name": "Wild Cross Curipera Discus",
@@ -88,7 +98,8 @@
     "description": "Honey gold. Fine white bars. A wild Curipera cross.",
     "price": 2800,
     "priceText": "₹2,800",
-    "available": true
+    "available": true,
+    "stock": 8
    },
    {
     "name": "Albino Platinum",
@@ -96,7 +107,8 @@
     "description": "Clean white body, soft rose blush.",
     "price": 3500,
     "priceText": "₹3,500",
-    "available": true
+    "available": true,
+    "stock": 30
    },
    {
     "name": "Galaxy Turquoises",
@@ -104,7 +116,8 @@
     "description": "Red and blue veins. Fine striations through the body.",
     "price": 1200,
     "priceText": "₹1,200",
-    "available": true
+    "available": true,
+    "stock": 25
    },
    {
     "name": "Wild Red Rose",
@@ -112,7 +125,8 @@
     "description": "Rose hue with wild face striations.",
     "price": 3250,
     "priceText": "₹3,250",
-    "available": true
+    "available": true,
+    "stock": 15
    },
    {
     "name": "Brilliant Blue Vipers",
@@ -120,7 +134,8 @@
     "description": "Snakeskin. More dots than zigzag lines.",
     "price": 1200,
     "priceText": "₹1,200",
-    "available": true
+    "available": true,
+    "stock": 25
    },
    {
     "name": "Blue Scorpion / Blue Snakeskin / Majestic Blue",
@@ -128,7 +143,8 @@
     "description": "Fine blue diamond body. Electric red lines on Majestic Blue. Red dots through the body on Snakeskin. Sparse red dots on the face and fins on Scorpion.",
     "price": 4250,
     "priceText": "₹4,250",
-    "available": true
+    "available": true,
+    "stock": 25
    },
    {
     "name": "Red Cover Blue Face & Rim",
@@ -136,7 +152,8 @@
     "description": "Wine red body. Blue face. Blue rims.",
     "price": 5000,
     "priceText": "₹5,000",
-    "available": true
+    "available": true,
+    "stock": 6
    },
    {
     "name": "Panthera Snakeskin",
@@ -144,7 +161,8 @@
     "description": "Fine Panthera leopard spotting. An exotic strain.",
     "price": 1800,
     "priceText": "₹1,800",
-    "available": true
+    "available": true,
+    "stock": 20
    }
   ],
   "frozen": [
@@ -1154,7 +1172,7 @@
    "turns": [
     {
      "in": "How many Yellow Diamonds left?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -1163,7 +1181,7 @@
    "turns": [
     {
      "in": "is it the last one?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -1172,7 +1190,7 @@
    "turns": [
     {
      "in": "how many fish do you have in stock?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -1181,7 +1199,7 @@
    "turns": [
     {
      "in": "Red Ninja stock evlo irukku?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -1190,7 +1208,7 @@
    "turns": [
     {
      "in": "How many pieces of Tiger Turquoise are available?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -1199,7 +1217,7 @@
    "turns": [
     {
      "in": "Is Albino Platinum selling fast?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -1208,7 +1226,7 @@
    "turns": [
     {
      "in": "Are there plenty of Galaxy Turquoises?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -1217,7 +1235,7 @@
    "turns": [
     {
      "in": "can I buy 20 Yellow Diamonds, do you have that many?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -1793,7 +1811,7 @@
    "turns": [
     {
      "in": "Do you have only one Red Ninja left?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -1802,7 +1820,7 @@
    "turns": [
     {
      "in": "Are Yellow Diamonds almost sold out?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -1829,7 +1847,7 @@
    "turns": [
     {
      "in": "Is stock limited?",
-     "expect": "internal"
+     "expect": "C1 stock"
     }
    ]
   },

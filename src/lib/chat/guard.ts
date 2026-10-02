@@ -4,7 +4,8 @@
  * 1. Strips phone-number-like digit runs (7+ digits, with spaces/dashes/+/dots
  *    between), emails and UPI handles.
  * 2. Blocks the whole reply (swaps in a safe line) if it contains a
- *    never-say term: stock figures, losses, supplier/breeder talk, payment
+ *    never-say term: scarcity wording (counts are shared only as "N in the Den
+ *    right now", read from the live site), losses, supplier/breeder talk, payment
  *    confirmation, refund approval, medicine/dosing, coupon-looking codes,
  *    discount-shop words.
  * 3. Fixes the brand name ("Discus Den" without "The" -> "The Discus Den").

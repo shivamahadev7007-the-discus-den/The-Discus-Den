@@ -13,6 +13,8 @@
 
 import {
   ANSWERS,
+  OWNER_FALLBACK,
+  ownerReply,
   PER_PIECE_LINE,
   VOLUME_DISCOUNT_LINE,
   type LeadFlag,
@@ -160,8 +162,15 @@ const RE = {
     /\b(died|dead|doa|passed\s+away|not\s+alive|refund|replacement|replace\s+(it|my|the))\b/,
   sick:
     /\b(sick|ill|unwell|disease|diseased|spots?|white\s+spot|not\s+eating|isn'?t\s+eating|stopped\s+eating|won'?t\s+eat|hiding|fungus|ich|bloat(ed)?|dropsy|parasites?|medicine|medication|treatment|treat|cure|salt|dying|gasping|clamped|udambu|sari\s+illa|saapdala|saapidala|saapidavillai|noi)\b/,
+  // Never shared (not on the site): mortality/loss figures, suppliers/breeders.
   internal:
-    /\b(how\s+many\b[^?.]*\b(left|remaining|available|in\s+stock|do\s+you\s+have|have\s+you\s+got|pieces|units)|any\s+left|left\s+in\s+stock|stock\s+left|how\s+many\s+(fish|discus)\s+(do\s+you\s+have|are\s+there|left)|stock\s+(count|level|quantity)|quantity\s+(left|available)|mortality|death\s+rate|how\s+many\s+died|losses|supplier|suppliers|breeder|breeders|where\s+do\s+you\s+(get|source|import|buy)|source\s+farm|which\s+farm|imported?\s+from|who\s+supplies|who\s+breeds|bred\s+by|yaar\s+kitta|vaangu\w*|selling\s+fast|sold\s+out|almost\s+gone|last\s+one|only\s+(one|1|\d+)\b[^?.]*\bleft|stock\s+(is\s+)?limited|limited\s+stock|plenty|enough\s+(for|of)|that\s+many|short\s+supply|running\s+out|(evlo|evvalavu|evlavu|evalo|ethana|ethanai)\b[^?.]*\b(irukk\w*|stock|left|pieces?)|(stock|pieces?)\s+(evlo|evvalavu|ethana)\w*)\b/,
+    /\b(mortality|death\s+rate|how\s+many\s+died|losses|supplier|suppliers|breeder|breeders|where\s+do\s+you\s+(get|source|import|buy)|source\s+farm|which\s+farm|imported?\s+from|who\s+supplies|who\s+breeds|bred\s+by|yaar\s+kitta|vaangu\w*)\b/,
+  // Stock counts: shared, but only as the live site lists them (3 Oct rule).
+  stock:
+    /\b(how\s+many\b[^?.]*\b(left|remaining|available|in\s+stock|do\s+you\s+have|have\s+you\s+got|pieces|units|are\s+there|in\s+the\s+den)|any\s+left|left\s+in\s+stock|stock\s+left|how\s+many\s+(fish|discus)\s+(do\s+you\s+have|are\s+there|left)|stock\s+(count|level|quantity|position|status)|quantity\s+(left|available)|how\s+much\s+stock|(what|which)\s+is\s+in\s+stock|in\s+stock\s+(now|today)|selling\s+fast|sold\s+out|almost\s+gone|last\s+one|only\s+(one|1|\d+)\b[^?.]*\bleft|\w+\s+left\s*\?|stock\s+(is\s+)?limited|limited\s+stock|plenty|enough\s+(for|of)|that\s+many|short\s+supply|running\s+out|(evlo|evvalavu|evlavu|evalo|ethana|ethanai)\b[^?.]*\b(irukk\w*|stock|left|pieces?|piece|fish)|(stock|pieces?)\s+(evlo|evvalavu|ethana)\w*)\b/,
+  // Who owns / runs the Den (the site footer names the owner).
+  owner:
+    /\b(who\s+(is|'s|s)\s+(the\s+)?(owner|proprietor|founder|boss|person\s+behind|man\s+behind|guy\s+behind)|who\s+owns|who\s+runs|who\s+(started|founded|is\s+running|is\s+behind)\s+(the\s+den|this|the\s+(shop|store|business))|owner('?s)?\s+name|name\s+of\s+the\s+owner|are\s+you\s+the\s+owner|whose\s+(shop|store|business)|owner\s+(yaar|yaaru|evar)|(yaar|yaaru)\s+owner)\b/,
   human:
     /\b(are\s+you\s+(a\s+)?(human|person|real|bot|robot|ai|machine)|is\s+this\s+(a\s+)?(bot|human|real\s+person|ai)|am\s+i\s+(talking|chatting)\s+(to|with)|you\s+a\s+bot)\b/,
   talkToShiva:
@@ -670,6 +679,69 @@ async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx
   };
 }
 
+/** All cards on the page, including sold-out ones (needed to say "out of stock"). */
+async function allStrains(ctx: Ctx): Promise<StrainCard[] | null> {
+  try {
+    return await ctx.catalog.strains();
+  } catch {
+    return null;
+  }
+}
+
+/** One card's count, worded only from what the site lists. */
+function stockLine(c: StrainCard): string {
+  const parts = [c.name, c.size].filter(Boolean).join(", ");
+  if (!c.available || c.stock === 0) return `• ${c.name}: out of stock right now.`;
+  if (c.stock === undefined) return `• ${parts}, ${c.priceText} per piece: see ${ANSWERS.stockPage} for the current count.`;
+  return `• ${parts}, ${c.priceText} per piece: ${c.stock} in the Den right now.`;
+}
+
+async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
+  const cards = await allStrains(ctx);
+  if (!cards || !cards.length) {
+    state.pendingOffer = "handoff";
+    return { reply: ANSWERS.stockFetchFailed, intent: "stock_fallback" };
+  }
+  const match = matchStrains(raw, cards);
+  const chosenWords = new Set(match.cards.flatMap((c) => words(c.name)));
+  const unmatchedVocab = strainWordsIn(t)
+    .filter((w) => !COLOURS.includes(w))
+    .filter((w) => !w.split(" ").every((x) => chosenWords.has(singular(x))));
+  if (match.cards.length && !unmatchedVocab.length) {
+    for (const c of match.cards) if (!state.interests.includes(c.name)) state.interests.push(c.name);
+    state.pendingOffer = "handoff";
+    return { reply: join(match.cards.slice(0, 5).map(stockLine).join("\n"), ANSWERS.stockOutro), intent: "stock_strain" };
+  }
+  // A strain the site doesn't list: no count, ever.
+  const vocab = match.cards.length ? unmatchedVocab : strainWordsIn(t).filter((w) => !COLOURS.includes(w));
+  if (vocab.length) {
+    addFlag(state, `STRAIN NOT LISTED: ${vocab.join(" ")}`.slice(0, 80) as LeadFlag);
+    state.pendingOffer = "handoff";
+    return { reply: ANSWERS.strainNotListedAsk, intent: "strain_not_listed" };
+  }
+  const listed = cards.filter((c) => c.available && c.stock !== undefined && c.stock > 0);
+  if (!listed.length) {
+    state.pendingOffer = "handoff";
+    return { reply: ANSWERS.stockFetchFailed, intent: "stock_fallback" };
+  }
+  state.pendingOffer = "narrow";
+  return {
+    reply: join(`${ANSWERS.stockIntro}\n${listed.slice(0, 5).map(stockLine).join("\n")}`, ANSWERS.stockListOutro),
+    intent: "stock_list",
+  };
+}
+
+async function ownerAnswer(state: ChatState, ctx: Ctx): Promise<Turn> {
+  let owner: string | null = null;
+  try {
+    owner = (await ctx.catalog.site?.())?.owner ?? null;
+  } catch {
+    owner = null;
+  }
+  state.pendingOffer = "handoff";
+  return { reply: ownerReply(owner ?? OWNER_FALLBACK), intent: "owner" };
+}
+
 async function foodAnswer(state: ChatState, ctx: Ctx, goat: boolean): Promise<Turn> {
   let foods: { frozen: FoodItem[] | null; pellets: FoodItem[] | null };
   try {
@@ -717,6 +789,11 @@ async function beginnerAnswer(state: ChatState, ctx: Ctx): Promise<Turn> {
     intent: "beginner",
   };
 }
+
+const QUARANTINE_HOLD =
+  /\b(quarantin\w*|hold|holds|holding|held|keep\s+(my|the)\s+fish|keep\s+them|keeps?\s+(the\s+)?fish|settle\w*|condition\w*\s+(the\s+)?fish)\b/;
+const SHIP_WORD =
+  /\b(ship|ships|shipped|shipping|send|sends|sent|deliver|delivers|delivered|delivery|courier\w*|dispatch\w*|parcel|post\s+it|anuppu\w*)\b/;
 
 function shippingAnswer(state: ChatState, t: string): Turn {
   const place = findPlace(t);
@@ -1034,6 +1111,18 @@ export const INTENT_RULES: readonly IntentRule[] = [
     run: ({ state }) => { state.pendingOffer = "narrow"; return { reply: ANSWERS.noInternalFigures, intent: "internal_figures" }; },
   },
   {
+    // LB-2: counts exactly as the live site lists them; never invented.
+    id: "stock_count", tier: "safety", faq: "C1: site counts only",
+    test: (m) => RE.stock.test(m.t),
+    run: ({ state, raw, t, ctx }) => stockAnswer(state, raw, t, ctx),
+  },
+  {
+    // LB-1: the owner's name as printed on the site. Never a phone/GPay number.
+    id: "owner", tier: "safety", faq: "B12: owner name from site",
+    test: (m) => RE.owner.test(m.t),
+    run: ({ state, ctx }) => ownerAnswer(state, ctx),
+  },
+  {
     id: "are_you_human", tier: "safety", faq: "Rules: are you a person",
     test: (m) => RE.human.test(m.t),
     run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.areYouHuman, intent: "are_you_human" }; },
@@ -1072,6 +1161,26 @@ export const INTENT_RULES: readonly IntentRule[] = [
     id: "reseller", tier: "faq", faq: "FAQ 17",
     test: (m) => RE.reseller.test(m.t),
     run: ({ state }) => { state.pendingOffer = "handoff"; return { reply: ANSWERS.reseller, intent: "reseller" }; },
+  },
+  {
+    // LB-3: quarantine / hold / keep-the-fish + shipping in one message ->
+    // "Yes." + quarantine (FAQ 13) + hold rule (FAQ 14) + delivery (FAQ 5/25),
+    // ahead of the plain holding and delivery-states answers.
+    id: "quarantine_ship", tier: "faq", faq: "LB-3: FAQ 13 + 14 + 5",
+    test: (m) => QUARANTINE_HOLD.test(m.t) && SHIP_WORD.test(m.t),
+    run: ({ state, t }) => {
+      const delivery = shippingAnswer(state, t);
+      let hold: string = ANSWERS.holding;
+      if (RE.holdingBeyond.test(t)) {
+        addFlag(state, "LONG HOLD");
+        hold = `${ANSWERS.holding} ${ANSWERS.holdingBeyond}`;
+        state.pendingOffer = "handoff";
+      }
+      return {
+        reply: join(`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine} ${hold}`, delivery.reply),
+        intent: "quarantine_ship",
+      };
+    },
   },
   {
     id: "holding", tier: "faq", faq: "FAQ 14",
