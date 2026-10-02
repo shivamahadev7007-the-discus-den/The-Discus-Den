@@ -19,6 +19,7 @@ import { Route as PurchasesRouteImport } from './routes/purchases'
 import { Route as SalesRouteImport } from './routes/sales'
 import { Route as ShipRouteImport } from './routes/ship'
 import { Route as StockRouteImport } from './routes/stock'
+import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as ApiWhatsappRouteImport } from './routes/api/whatsapp'
 import { Route as BooksIndexRouteImport } from './routes/books/index'
 import { Route as BooksPurchasesRouteImport } from './routes/books/purchases'
@@ -76,6 +77,11 @@ const StockRoute = StockRouteImport.update({
   path: '/stock',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiChatRoute = ApiChatRouteImport.update({
+  id: '/api/chat',
+  path: '/api/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiWhatsappRoute = ApiWhatsappRouteImport.update({
   id: '/api/whatsapp',
   path: '/api/whatsapp',
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/sales': typeof SalesRoute
   '/ship': typeof ShipRoute
   '/stock': typeof StockRoute
+  '/api/chat': typeof ApiChatRoute
   '/api/whatsapp': typeof ApiWhatsappRoute
   '/books/purchases': typeof BooksPurchasesRoute
   '/books/sales': typeof BooksSalesRoute
@@ -136,6 +143,7 @@ export interface FileRoutesByTo {
   '/sales': typeof SalesRoute
   '/ship': typeof ShipRoute
   '/stock': typeof StockRoute
+  '/api/chat': typeof ApiChatRoute
   '/api/whatsapp': typeof ApiWhatsappRoute
   '/books/purchases': typeof BooksPurchasesRoute
   '/books/sales': typeof BooksSalesRoute
@@ -155,6 +163,7 @@ export interface FileRoutesById {
   '/sales': typeof SalesRoute
   '/ship': typeof ShipRoute
   '/stock': typeof StockRoute
+  '/api/chat': typeof ApiChatRoute
   '/api/whatsapp': typeof ApiWhatsappRoute
   '/books/purchases': typeof BooksPurchasesRoute
   '/books/sales': typeof BooksSalesRoute
@@ -175,6 +184,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/ship'
     | '/stock'
+    | '/api/chat'
     | '/api/whatsapp'
     | '/books/purchases'
     | '/books/sales'
@@ -193,6 +203,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/ship'
     | '/stock'
+    | '/api/chat'
     | '/api/whatsapp'
     | '/books/purchases'
     | '/books/sales'
@@ -211,6 +222,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/ship'
     | '/stock'
+    | '/api/chat'
     | '/api/whatsapp'
     | '/books/purchases'
     | '/books/sales'
@@ -230,6 +242,7 @@ export interface RootRouteChildren {
   SalesRoute: typeof SalesRoute
   ShipRoute: typeof ShipRoute
   StockRoute: typeof StockRoute
+  ApiChatRoute: typeof ApiChatRoute
   ApiWhatsappRoute: typeof ApiWhatsappRoute
   BooksPurchasesRoute: typeof BooksPurchasesRoute
   BooksSalesRoute: typeof BooksSalesRoute
@@ -310,6 +323,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StockRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/chat': {
+      id: '/api/chat'
+      path: '/api/chat'
+      fullPath: '/api/chat'
+      preLoaderRoute: typeof ApiChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/whatsapp': {
       id: '/api/whatsapp'
       path: '/api/whatsapp'
@@ -366,6 +386,7 @@ const rootRouteChildren: RootRouteChildren = {
   SalesRoute: SalesRoute,
   ShipRoute: ShipRoute,
   StockRoute: StockRoute,
+  ApiChatRoute: ApiChatRoute,
   ApiWhatsappRoute: ApiWhatsappRoute,
   BooksPurchasesRoute: BooksPurchasesRoute,
   BooksSalesRoute: BooksSalesRoute,

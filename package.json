@@ -16,10 +16,11 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test scripts/**/*.test.mjs && node scripts/test-front-desk.mjs",
+    "test": "node --test scripts/**/*.test.mjs && node scripts/test-front-desk.mjs && node scripts/test-chat.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test:fe2": "node scripts/test-front-desk.mjs"
+    "test:fe2": "node scripts/test-front-desk.mjs",
+    "test:chat": "node scripts/test-chat.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

@@ -16,3 +16,6 @@ attachments/
 
 # FE-2 local test compile output
 .tmp-fe2-test/
+
+# Chat Assistant local test compile output
+.tmp-chat-test/
