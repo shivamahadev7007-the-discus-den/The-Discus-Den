@@ -276,10 +276,10 @@ describe("trick prompts + never-say", () => {
     assert.equal((await one("How do I pay?")).reply, ANSWERS.howToPay);
   });
 
-  it("supplier -> refuse without figures; stock count -> the site's count only (C1, 3 Oct rule)", async () => {
+  it("supplier -> refuse without figures; stock question -> availability only, no count (C1, Shiva 3 Oct)", async () => {
     assert.equal((await one("who is your supplier?")).reply, ANSWERS.noInternalFigures);
     const r = await one("How many yellow diamonds are left?");
-    assert.match(r.reply, /^• Yellow Diamonds, 2–2\.5 inch, ₹850 per piece: 25 in the Den right now\./);
+    assert.match(r.reply, /^• Yellow Diamonds, 2–2\.5 inch, ₹850 per piece: in stock right now\./);
   });
 
   it("sick fish (incl. Tanglish) -> no advice, handoff offer, flag", async () => {
@@ -838,21 +838,22 @@ describe("Kiara run 1 · B13 Tamil/Tanglish (FAQ 24)", () => {
 });
 
 describe("Kiara run 1 · related C1/C5/C7/A6 routings", () => {
-  // C1 (3 Oct rule): scarcity/stock questions now get the site's counts, never hype.
+  // C1 (Shiva, 3 Oct): scarcity/stock questions get in/out of stock only, never a count or hype.
   for (const [m, want] of [
-    ["is it the last one?", /^Here's what the site lists in the Den right now:/],
-    ["Is Albino Platinum selling fast?", /^• Albino Platinum, 3–3\.5 inch, ₹3,500 per piece: 30 in the Den right now\./],
-    ["can I buy 20 Yellow Diamonds, do you have that many?", /^• Yellow Diamonds, 2–2\.5 inch, ₹850 per piece: 25 in the Den right now\./],
-    ["Do you have only one Red Ninja left?", /^• Red Ninja Discus, 4 inch, ₹3,250 per piece: 15 in the Den right now\./],
-    ["Are Yellow Diamonds almost sold out?", /^• Yellow Diamonds, 2–2\.5 inch, ₹850 per piece: 25 in the Den right now\./],
-    ["Is stock limited?", /^Here's what the site lists in the Den right now:/],
-    ["Red Ninja stock evlo irukku?", /^• Red Ninja Discus, 4 inch, ₹3,250 per piece: 15 in the Den right now\./],
+    ["is it the last one?", /^Here's what the site shows as in stock right now:/],
+    ["Is Albino Platinum selling fast?", /^• Albino Platinum, 3–3\.5 inch, ₹3,500 per piece: in stock right now\./],
+    ["can I buy 20 Yellow Diamonds, do you have that many?", /^• Yellow Diamonds, 2–2\.5 inch, ₹850 per piece: in stock right now\./],
+    ["Do you have only one Red Ninja left?", /^• Red Ninja Discus, 4 inch, ₹3,250 per piece: in stock right now\./],
+    ["Are Yellow Diamonds almost sold out?", /^• Yellow Diamonds, 2–2\.5 inch, ₹850 per piece: in stock right now\./],
+    ["Is stock limited?", /^Here's what the site shows as in stock right now:/],
+    ["Red Ninja stock evlo irukku?", /^• Red Ninja Discus, 4 inch, ₹3,250 per piece: in stock right now\./],
     ["Are there plenty of Galaxy Turquoises?", /^Galaxy|not on our available page|isn't on|STRAIN|Shiva/i],
   ] as const) {
-    it(`site count only, no hype: ${m}`, async () => {
+    it(`availability only, no count or hype: ${m}`, async () => {
       const r = await one(m);
       assert.match(r.reply, want, m);
       assert.equal(guardReply(r.reply).text, r.reply, m);
+      assertNoQuantity(r.reply, m);
     });
   }
   for (const m of [
@@ -1038,6 +1039,15 @@ describe("FAQ 25 · delivery abroad", () => {
   });
 });
 
+/** No quantity on hand: strip prices and sizes, then no digit may remain. */
+function assertNoQuantity(reply: string, ctx: string): void {
+  assert.doesNotMatch(reply, /\b\d+\s+(in\s+the\s+den|left|available|remaining|pieces?|pcs|units?|in\s+stock|on\s+hand)\b/i, ctx);
+  const rest = reply
+    .replace(/₹\s?[\d,]+/g, "")
+    .replace(/\d+(?:\.\d+)?(?:\s*(?:–|-|to)\s*\d+(?:\.\d+)?)?\s*inch/gi, "");
+  assert.doesNotMatch(rest, /\d/, `${ctx}\n${reply}`);
+}
+
 // ---------------------------------------------------------------------------
 // LB-1 / B12 and LB-2 / C1 (3 Oct rule: share what the public site shows,
 // read live from the site; never the code, GPay/phone, mortality, suppliers)
@@ -1088,55 +1098,53 @@ describe("B12 · LB-1: owner name from the site", () => {
   });
 });
 
-describe("C1 · LB-2: stock counts exactly as the live site lists them", () => {
-  const BIG = "• Blue Diamonds (Big), 4.5 inch, ₹3,750 per piece: 25 in the Den right now.";
+describe("C1 · LB-2: availability only, never a quantity (Shiva's ruling, 3 Oct)", () => {
+  const BIG = "• Blue Diamonds (Big), 4.5 inch, ₹3,750 per piece: in stock right now.";
   for (const m of [
     "how many Blue Diamonds left?",
     "How many blue diamonds do you have?",
     "blue diamonds stock count?",
     "Blue Diamonds evlo irukku?",
     "how many big blue diamonds are available?",
+    "exactly how many blue diamonds?",
+    "do you have more than 10 blue diamonds?",
+    "blue diamonds quantity?",
   ]) {
-    it(`site count: ${m}`, async () => {
+    it(`in stock, no number: ${m}`, async () => {
       const r = await one(m);
       assert.ok(r.reply.includes(BIG), `${m}\n${r.reply}`);
       assert.equal(r.intent, "stock_strain");
       assert.equal(guardReply(r.reply).text, r.reply, m);
+      assertNoQuantity(r.reply, m);
     });
   }
-  it("'Blue Diamonds' (both sizes) -> both cards' site counts", async () => {
+  it("'Blue Diamonds' (both sizes) -> both cards, availability only", async () => {
     const r = await one("how many Blue Diamonds left?");
     assert.ok(r.reply.includes(BIG));
-    assert.ok(r.reply.includes("• Blue Diamonds (Small), 3 inch, ₹1,100 per piece: 25 in the Den right now."));
+    assert.ok(r.reply.includes("• Blue Diamonds (Small), 3 inch, ₹1,100 per piece: in stock right now."));
+    assert.match(r.reply, /Shiva confirms quantities with you personally/);
   });
-  it("every count quoted equals the site's count (no invented numbers)", async () => {
-    const site = parseSiteStock(SITE_BUNDLE_JS);
-    for (const m of ["how many fish do you have in stock?", "how many Blue Diamonds left?", "Albino Platinum stock evlo?", "how many red ninja left?"]) {
-      const r = await one(m);
-      for (const [, name, n] of r.reply.matchAll(/^• ([^,]+(?:\([^)]*\))?)[^:]*: (\d+) in the Den right now\./gm)) {
-        assert.equal(Number(n), site.get(normName(name!.trim())), `${m}: ${name}`);
-      }
-    }
+  it("generic stock question -> in-stock list, no numbers", async () => {
+    const r = await one("how many fish do you have in stock?");
+    assert.match(r.reply, /^Here's what the site shows as in stock right now:/);
+    assertNoQuantity(r.reply, "generic");
   });
-  it("no count for a card with none listed on the site", async () => {
+  it("card with no stock listed -> point to /available, no guess", async () => {
     const r = await one("how many Red Cover Blue Face left?");
-    assert.match(r.reply, /Red Cover Blue Face & Rim, 4\.75 to 5\.5 inch, ₹5,000 per piece: see thediscusden\.com\/available for the current count\./);
-    assert.doesNotMatch(r.reply, /in the Den right now/);
+    assert.match(r.reply, /Red Cover Blue Face & Rim, 4\.75 to 5\.5 inch, ₹5,000 per piece: see thediscusden\.com\/available for current availability\./);
   });
   it("sold-out card -> 'out of stock', no number", async () => {
     const r = await one("how many Ghost Test Strain left?");
     assert.match(r.reply, /^• Ghost Test Strain: out of stock right now\./);
   });
-  it("strain not on the site -> no count at all", async () => {
-    const r = await one("how many leopard snakeskin left?");
-    assert.equal(r.reply, ANSWERS.strainNotListedAsk);
-    assert.doesNotMatch(r.reply, /\d/);
+  it("strain not on the site -> 'not on our available page'", async () => {
+    assert.equal((await one("how many leopard snakeskin left?")).reply, ANSWERS.strainNotListedAsk);
   });
-  it("bundle unreadable -> no counts, points to /available (never guesses)", async () => {
+  it("bundle unreadable -> no in/out guess, points to /available", async () => {
     const cat = createCatalogLoader({ fetch: mockFetch({ "/available": AVAILABLE_HTML }) });
     const r = await one("how many Blue Diamonds left?", cat);
-    assert.match(r.reply, /Blue Diamonds \(Big\), 4\.5 inch, ₹3,750 per piece: see thediscusden\.com\/available for the current count\./);
-    assert.doesNotMatch(r.reply, /in the Den right now/);
+    assert.match(r.reply, /Blue Diamonds \(Big\), 4\.5 inch, ₹3,750 per piece: see thediscusden\.com\/available for current availability\./);
+    assert.doesNotMatch(r.reply, /in stock right now/);
     assert.equal((await one("how many fish do you have in stock?", cat)).reply, ANSWERS.stockFetchFailed);
   });
   it("page unreadable -> safe fallback to thediscusden.com/available", async () => {
@@ -1144,48 +1152,63 @@ describe("C1 · LB-2: stock counts exactly as the live site lists them", () => {
     assert.equal(r.reply, ANSWERS.stockFetchFailed);
     assert.match(r.reply, /thediscusden\.com\/available/);
   });
-  it("counts are cached like prices: one page fetch per TTL, bundle once per hashed path", async () => {
+  it("availability is cached like prices: one page fetch per TTL, bundle once per hashed path", async () => {
     let n = 0;
     let t = 0;
-    const urls: string[] = [];
     const fetchImpl: FetchLike = async (url) => {
       n += 1;
-      urls.push(url);
       const body = url.endsWith("/available") ? AVAILABLE_HTML : url.endsWith("/assets/index-TEST123.js") ? SITE_BUNDLE_JS : null;
       return body ? { ok: true, status: 200, text: async () => body } : { ok: false, status: 404, text: async () => "" };
     };
     const cat = createCatalogLoader({ fetch: fetchImpl, now: () => t });
     await one("how many Blue Diamonds left?", cat);
     await one("how many red ninja left?", cat);
-    assert.equal(n, 2, urls.join(" "));
+    assert.equal(n, 2);
     t = 61_000;
-    assert.ok((await one("how many red ninja left?", cat)).reply.includes(": 15 in the Den right now."));
-    assert.equal(n, 3, "page refetched after TTL, unchanged bundle not refetched");
+    assert.ok((await one("how many red ninja left?", cat)).reply.includes(": in stock right now."));
+    assert.equal(n, 3);
   });
-  it("no mortality or supplier detail rides along with counts", async () => {
-    const supplier = await one("how many Blue Diamonds left and who is your supplier?");
-    assert.equal(supplier.reply, ANSWERS.noInternalFigures);
-    const died = await one("how many Blue Diamonds left and how many died?");
-    assert.equal(died.reply, ANSWERS.lossSafetyNet);
+  it("no mortality or supplier detail rides along", async () => {
+    assert.equal((await one("how many Blue Diamonds left and who is your supplier?")).reply, ANSWERS.noInternalFigures);
+    assert.equal((await one("how many Blue Diamonds left and how many died?")).reply, ANSWERS.lossSafetyNet);
     for (const m of ["how many Blue Diamonds left?", "how many fish do you have in stock?"]) {
       assert.doesNotMatch((await one(m)).reply, /supplier|breeder|farm|import|mortality|died|dead|loss/i, m);
     }
   });
-  it("mid-handoff: answers the count, then re-asks the pending question", async () => {
-    const out = await chat(["Talk to Shiva", "how many Blue Diamonds left?"]);
-    const r = out.at(-1)!;
+  it("mid-handoff: answers availability, then re-asks the pending question", async () => {
+    const r = (await chat(["Talk to Shiva", "how many Blue Diamonds left?"])).at(-1)!;
     assert.ok(r.reply.includes(BIG));
     assert.ok(r.reply.endsWith(ANSWERS.handoffAskName), r.reply);
+    assertNoQuantity(r.reply, "mid-handoff");
   });
-  it("parseSiteStock / attachStock read only name+stock pairs", () => {
+  it("parseSiteStock / attachStock read only name+stock pairs (used for in/out only)", () => {
     const m = parseSiteStock(SITE_BUNDLE_JS);
     assert.equal(m.get(normName("Blue Diamonds (Big)")), 25);
-    assert.equal(m.get(normName("Blue Diamonds (Small)")), 25);
     assert.equal(m.has(normName("Red Cover Blue Face & Rim")), false);
     assert.equal(findSiteBundlePath(AVAILABLE_HTML), "/assets/index-TEST123.js");
     const cards = attachStock(parseAvailableHtml(AVAILABLE_HTML), m);
     assert.equal(cards.find((c) => c.name === "Red Ninja Discus")!.stock, 15);
     assert.equal(cards.find((c) => c.name.startsWith("Red Cover"))!.stock, undefined);
+  });
+  it("guard blocks any outgoing quantity phrasing", () => {
+    for (const bad of [
+      "Blue Diamonds: 25 in the Den right now.",
+      "We have 25 of them.",
+      "There are 8 left.",
+      "Only 3 left!",
+      "25 available today.",
+      "12 pieces ready to ship.",
+      "Stock: 30",
+      "qty is 15",
+      "about 20 in stock",
+      "20 fish available",
+      "6 remaining",
+    ]) {
+      assert.notEqual(guardReply(bad).text, bad, bad);
+    }
+    for (const ok of [BIG, "5% off for 5–9 fish, 10% off for 10 or more, applied in the cart.", "We can hold fish for up to 7 days free."]) {
+      assert.equal(guardReply(ok).text, ok, ok);
+    }
   });
 });
 

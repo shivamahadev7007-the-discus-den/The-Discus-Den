@@ -9,12 +9,12 @@
  * fallback pointing to /available. It never guesses.
  *
  * Read from the page: name, size, one-line description and price per card,
- * plus the owner name printed in the site footer. Stock counts (3 Oct rule:
- * the bot may share what the public site shows) come from the same strain
- * list the /available page renders: the site's own client bundle, where each
- * card's quantity stepper is capped at its `stock`. A count is attached only
- * when the bundle lists that exact card name; otherwise it stays undefined
- * and the bot points to /available instead of guessing.
+ * plus the owner name printed in the site footer. Stock values come from the
+ * same strain list the /available page renders: the site's own client bundle,
+ * where each card's quantity stepper is capped at its `stock`. They are used
+ * ONLY to say in stock / out of stock (Shiva's ruling, 3 Oct: never a
+ * quantity). A value is attached only when the bundle lists that exact card
+ * name; otherwise it stays undefined and the bot points to /available.
  */
 
 import { AVAILABLE_URL, FROZEN_URL, PELLETS_URL, SITE_URL } from "./answers.ts";

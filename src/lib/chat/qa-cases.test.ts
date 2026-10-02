@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ANSWERS } from "./answers.ts";
+import { ANSWERS, VOLUME_DISCOUNT_LINE } from "./answers.ts";
 import type { CatalogLoader, FoodItem, StrainCard } from "./catalog.ts";
 import { INTENT_PRIORITY, INTENT_RULES, respond, type ChatState } from "./engine.ts";
 import { faqIdOf } from "./faq-id.ts";
@@ -286,5 +286,73 @@ describe("round 3: High and Medium misses route to the FAQ 26 safety net", () =>
     assert.deepEqual(prices, [...prices].sort((a, b) => a - b));
     const under = await ask("do you have anything under 1000 rupees?");
     for (const m of under.reply.matchAll(/₹([\d,]+) per piece/g)) assert.ok(Number(m[1]!.replace(/,/g, "")) <= 1000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C1 (Shiva's ruling, 3 Oct): availability only. Sweep all 18 live cards with
+// many quantity phrasings; no reply may carry a quantity on hand.
+// ---------------------------------------------------------------------------
+const QTY_PHRASE = /\b\d+\s+(in\s+the\s+den|left|available|remaining|pieces?|pcs|units?|in\s+stock|on\s+hand|of\s+them)\b/i;
+
+/** Remove prices (₹3,750) and sizes (4.5 inch, 4–4.5 inch, 4.75 to 5.5 inch); nothing numeric may remain. */
+function digitsAfterPricesAndSizes(reply: string): string[] {
+  const rest = reply
+    .replace(VOLUME_DISCOUNT_LINE, "") // Shiva-approved volume discount, not a quantity on hand
+    .replace(/₹\s?[\d,]+/g, "")
+    .replace(/\d+(?:\.\d+)?(?:\s*(?:–|-|to)\s*\d+(?:\.\d+)?)?\s*inch/gi, "");
+  return rest.match(/\d+/g) ?? [];
+}
+
+describe("C1 no-count sweep: 18 live cards x quantity phrasings", () => {
+  const cards = fixture.catalog.strains;
+  const stockValues = new Set(cards.map((c) => c.stock).filter((n): n is number => typeof n === "number"));
+  const phrasings = (n: string) => [
+    `how many ${n} left?`,
+    `how many ${n} do you have?`,
+    `how many ${n} are available?`,
+    `${n} quantity?`,
+    `${n} qty available?`,
+    `${n} stock evlo?`,
+    `${n} stock evlo irukku?`,
+    `${n} ethana irukku?`,
+    `${n} count?`,
+    `${n} stock count?`,
+    `${n} pieces left?`,
+    `exactly how many ${n}?`,
+    `exactly how many ${n} do you have in stock?`,
+    `do you have more than 10 ${n}?`,
+    `more than 10 ${n}?`,
+    `at least 5 ${n} available?`,
+    `how many ${n} can I buy?`,
+    `is ${n} in stock?`,
+    `only one ${n} left?`,
+    `${n} sold out?`,
+  ];
+  it("fixture has all 18 cards with their site stock values", () => {
+    assert.equal(cards.length, 18);
+    assert.ok(cards.every((c) => typeof c.stock === "number"));
+  });
+  for (const c of cards) {
+    it(`${c.name}: availability only, no quantity`, async () => {
+      for (const m of phrasings(c.name)) {
+        const r = await ask(m);
+        assert.doesNotMatch(r.reply, QTY_PHRASE, `${m}\n${r.reply}`);
+        const digits = digitsAfterPricesAndSizes(r.reply);
+        assert.deepEqual(digits, [], `stray number in reply to "${m}":\n${r.reply}`);
+        for (const d of digits) assert.ok(!stockValues.has(Number(d)), `stock value ${d} leaked: ${m}`);
+        assert.equal(guardReply(r.reply).text, r.reply, `guard would rewrite: ${m}`);
+        assertSafe(r.reply, m);
+      }
+      const r = await ask(`how many ${c.name} left?`);
+      assert.ok(r.reply.includes(`• ${c.name}`), r.reply);
+      assert.match(r.reply, c.available && (c.stock ?? 0) > 0 ? /: in stock right now\./ : /: out of stock right now\./);
+    });
+  }
+  it("no replayed QA reply carries a quantity phrasing", async () => {
+    for (const s of fixture.sessions) {
+      const out = await convo(s.turns.map((t) => t.in));
+      for (const r of out) assert.doesNotMatch(r.reply, QTY_PHRASE, `${s.ref}: ${r.reply}`);
+    }
   });
 });

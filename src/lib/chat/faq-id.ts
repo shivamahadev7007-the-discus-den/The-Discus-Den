@@ -85,7 +85,7 @@ export function faqIdOf(reply: string): string {
   if (first.startsWith(ANSWERS.availableIntro)) return "FAQ 1";
   if (first.startsWith(ANSWERS.stockIntro)) return "C1 stock";
   if (first.startsWith(`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine}`)) return "LB-3";
-  if (first.startsWith("•") && /: (\d+ in the Den right now|out of stock right now|see \S+ for the current count)\.$/m.test(first)) return "C1 stock";
+  if (first.startsWith("•") && /: (in stock right now|out of stock right now|see \S+ for current availability)\.$/m.test(first)) return "C1 stock";
   if (first.startsWith(ownerReply("").split(",")[0]!.trim())) return "B12 owner";
   if (first.startsWith("•")) return "FAQ 2";
   if (first.startsWith(`${ANSWERS.foodIntro} `)) return "FAQ 15";

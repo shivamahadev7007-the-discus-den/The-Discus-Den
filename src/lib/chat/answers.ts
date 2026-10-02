@@ -148,15 +148,17 @@ export const ANSWERS = {
   /** FAQ 22: claimed promises or offers. Takes priority over FAQ 14 (holding) and FAQ 19 (discounts). */
   claimedOffer: "I can't confirm or apply that here. Shiva will check it with you personally. Shall I pass your details to him?",
   /**
-   * C1 (3 Oct rule): stock counts are shared only as the live site lists them.
+   * C1 (Shiva's ruling, 3 Oct): availability only. The bot says whether a card
+   * is in or out of stock, as the live site shows it, and NEVER how many.
    * Lines are built per card in engine.ts; these are the fixed parts.
    */
   stockPage: "thediscusden.com/available",
-  stockIntro: "Here's what the site lists in the Den right now:",
-  stockOutro: "Counts are as listed on thediscusden.com/available right now. Want me to pass your details to Shiva?",
-  stockListOutro: "Full list with counts: thediscusden.com/available\nWant me to narrow it down by size or colour?",
+  stockIntro: "Here's what the site shows as in stock right now:",
+  stockOutro:
+    "Availability is as shown on thediscusden.com/available right now. Shiva confirms quantities with you personally. Want me to pass your details to him?",
+  stockListOutro: "Full list: thediscusden.com/available\nWant me to narrow it down by size or colour?",
   stockFetchFailed:
-    "I can't load the live counts right now. You can see them at thediscusden.com/available. Or I can pass your question to Shiva.",
+    "I can't load live availability right now. You can check thediscusden.com/available. Or I can pass your question to Shiva.",
   /** Rule 1/2/3: no loss figures or sources (not on the site). Not verbatim in the pack. */
   noInternalFigures:
     "I can't share that here. Our available page shows what's ready now: thediscusden.com/available. Want me to narrow it down by size or colour?",

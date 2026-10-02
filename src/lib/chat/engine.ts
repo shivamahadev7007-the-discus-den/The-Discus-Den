@@ -165,9 +165,9 @@ const RE = {
   // Never shared (not on the site): mortality/loss figures, suppliers/breeders.
   internal:
     /\b(mortality|death\s+rate|how\s+many\s+died|losses|supplier|suppliers|breeder|breeders|where\s+do\s+you\s+(get|source|import|buy)|source\s+farm|which\s+farm|imported?\s+from|who\s+supplies|who\s+breeds|bred\s+by|yaar\s+kitta|vaangu\w*)\b/,
-  // Stock counts: shared, but only as the live site lists them (3 Oct rule).
+  // Stock / quantity questions: answered with availability only, never a number.
   stock:
-    /\b(how\s+many\b[^?.]*\b(left|remaining|available|in\s+stock|do\s+you\s+have|have\s+you\s+got|pieces|units|are\s+there|in\s+the\s+den)|any\s+left|left\s+in\s+stock|stock\s+left|how\s+many\s+(fish|discus)\s+(do\s+you\s+have|are\s+there|left)|stock\s+(count|level|quantity|position|status)|quantity\s+(left|available)|how\s+much\s+stock|(what|which)\s+is\s+in\s+stock|in\s+stock\s+(now|today)|selling\s+fast|sold\s+out|almost\s+gone|last\s+one|only\s+(one|1|\d+)\b[^?.]*\bleft|\w+\s+left\s*\?|stock\s+(is\s+)?limited|limited\s+stock|plenty|enough\s+(for|of)|that\s+many|short\s+supply|running\s+out|(evlo|evvalavu|evlavu|evalo|ethana|ethanai)\b[^?.]*\b(irukk\w*|stock|left|pieces?|piece|fish)|(stock|pieces?)\s+(evlo|evvalavu|ethana)\w*)\b/,
+    /\b(how\s+many\b[^?.]*\b(left|remaining|available|in\s+stock|do\s+you\s+have|have\s+you\s+got|pieces|units|are\s+there|in\s+the\s+den|can\s+i\s+(buy|get|order)|on\s+hand)|exactly\s+how\s+many|how\s+many\s+exactly|(more|less|fewer)\s+than\s+\d+|at\s+least\s+\d+|\d+\s+(pieces?|pcs|nos?)\s+(available|irukk\w*)|quantity|qty|count(?=\s*\?)|count$|count\s+(of|left|available|irukk\w*)|pieces?\s+(left|available|remaining)|in\s+stock(?=\s*\?)|any\s+left|left\s+in\s+stock|stock\s+left|how\s+many\s+(fish|discus)\s+(do\s+you\s+have|are\s+there|left)|stock\s+(count|level|quantity|position|status)|quantity\s+(left|available)|how\s+much\s+stock|(what|which)\s+is\s+in\s+stock|in\s+stock\s+(now|today)|selling\s+fast|sold\s+out|almost\s+gone|last\s+one|only\s+(one|1|\d+)\b[^?.]*\bleft|\w+\s+left\s*\?|stock\s+(is\s+)?limited|limited\s+stock|plenty|enough\s+(for|of)|that\s+many|short\s+supply|running\s+out|(evlo|evvalavu|evlavu|evalo|ethana|ethanai)\b[^?.]*\b(irukk\w*|stock|left|pieces?|piece|fish)|(stock|pieces?)\s+(evlo|evvalavu|ethana)\w*)\b/,
   // Who owns / runs the Den (the site footer names the owner).
   owner:
     /\b(who\s+(is|'s|s)\s+(the\s+)?(owner|proprietor|founder|boss|person\s+behind|man\s+behind|guy\s+behind)|who\s+owns|who\s+runs|who\s+(started|founded|is\s+running|is\s+behind)\s+(the\s+den|this|the\s+(shop|store|business))|owner('?s)?\s+name|name\s+of\s+the\s+owner|are\s+you\s+the\s+owner|whose\s+(shop|store|business)|owner\s+(yaar|yaaru|evar)|(yaar|yaaru)\s+owner)\b/,
@@ -688,12 +688,15 @@ async function allStrains(ctx: Ctx): Promise<StrainCard[] | null> {
   }
 }
 
-/** One card's count, worded only from what the site lists. */
+/**
+ * One card's availability (C1, Shiva's ruling 3 Oct): in / out of stock only.
+ * The site's stock number decides which; the number itself is never written.
+ */
 function stockLine(c: StrainCard): string {
   const parts = [c.name, c.size].filter(Boolean).join(", ");
   if (!c.available || c.stock === 0) return `• ${c.name}: out of stock right now.`;
-  if (c.stock === undefined) return `• ${parts}, ${c.priceText} per piece: see ${ANSWERS.stockPage} for the current count.`;
-  return `• ${parts}, ${c.priceText} per piece: ${c.stock} in the Den right now.`;
+  if (c.stock === undefined) return `• ${parts}, ${c.priceText} per piece: see ${ANSWERS.stockPage} for current availability.`;
+  return `• ${parts}, ${c.priceText} per piece: in stock right now.`;
 }
 
 async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
@@ -1111,8 +1114,8 @@ export const INTENT_RULES: readonly IntentRule[] = [
     run: ({ state }) => { state.pendingOffer = "narrow"; return { reply: ANSWERS.noInternalFigures, intent: "internal_figures" }; },
   },
   {
-    // LB-2: counts exactly as the live site lists them; never invented.
-    id: "stock_count", tier: "safety", faq: "C1: site counts only",
+    // LB-2 (Shiva, 3 Oct): availability only (in / out of stock), never a quantity.
+    id: "stock_count", tier: "safety", faq: "C1: availability only",
     test: (m) => RE.stock.test(m.t),
     run: ({ state, raw, t, ctx }) => stockAnswer(state, raw, t, ctx),
   },

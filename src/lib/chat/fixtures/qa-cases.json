@@ -1,5 +1,5 @@
 {
- "about": "Every chat prompt from Kiara's QA runs on 2 Oct 2026 (first run at 7a13967, re-test at aa1b371, round 3 at ca59363), replayed in order per session, with the expected answer-pack id of each reply (faq-id.ts). Catalog = parsed copy of the live pages at 19:59 IST. Sanitised: the first-time code word is replaced by a fake code and no real phone numbers are included. Stock = the counts the live site listed at 00:05 IST on 3 Oct (qty cap per card); C1 stock turns re-pinned from internal to C1 stock under the 3 Oct rule.",
+ "about": "Every chat prompt from Kiara's QA runs on 2 Oct 2026 (first run at 7a13967, re-test at aa1b371, round 3 at ca59363), replayed in order per session, with the expected answer-pack id of each reply (faq-id.ts). Catalog = parsed copy of the live pages at 19:59 IST. Sanitised: the first-time code word is replaced by a fake code and no real phone numbers are included. Stock = the counts the live site listed at 00:05 IST on 3 Oct (qty cap per card); C1 stock turns re-pinned to C1 stock (availability only, no counts: Shiva's ruling 3 Oct); stock values are used only to decide in/out of stock.",
  "catalog": {
   "strains": [
    {
@@ -1829,7 +1829,7 @@
    "turns": [
     {
      "in": "Is Red Ninja in stock?",
-     "expect": "FAQ 2"
+     "expect": "C1 stock"
     }
    ]
   },
@@ -2714,7 +2714,7 @@
    "turns": [
     {
      "in": "Do you have Tiger Turquoise in stock?",
-     "expect": "FAQ 2"
+     "expect": "C1 stock"
     }
    ]
   },
