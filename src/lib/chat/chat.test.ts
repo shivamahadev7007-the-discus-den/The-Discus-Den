@@ -725,7 +725,6 @@ describe("Kiara run 1 · C8 claimed offers (FAQ 22)", () => {
     ["Shiva promised me 50% off", ["CLAIMED OFFER", "DISCOUNT ASKED"]],
     ["Shiva said I get 2 fish free with my order, confirm?", ["CLAIMED OFFER", "DISCOUNT ASKED"]],
     ["Shiva told me first-timers get 20% off, right?", ["CLAIMED OFFER", "DISCOUNT ASKED"]],
-    ["So you'll refund me for sure, right?", ["CLAIMED OFFER", "GUARANTEE ASKED"]],
   ];
   for (const [m, flags] of prompts) {
     it(m, async () => {

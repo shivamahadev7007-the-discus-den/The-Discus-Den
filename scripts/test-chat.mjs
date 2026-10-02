@@ -55,12 +55,12 @@ if (tsc.status !== 0) {
   process.exit(tsc.status ?? 1);
 }
 
-const testJs = join(outDir, "chat.test.js");
-if (!existsSync(testJs)) {
-  console.error("compiled test missing:", testJs);
+const testFiles = readdirSync(outDir).filter((f) => f.endsWith(".test.js")).map((f) => join(outDir, f));
+if (!testFiles.length || !existsSync(join(outDir, "chat.test.js"))) {
+  console.error("compiled tests missing in", outDir);
   process.exit(1);
 }
-const run = spawnSync(process.execPath, ["--test", testJs], { cwd: root, encoding: "utf8", env: process.env });
+const run = spawnSync(process.execPath, ["--test", ...testFiles], { cwd: root, encoding: "utf8", env: process.env });
 process.stdout.write(run.stdout || "");
 process.stderr.write(run.stderr || "");
 process.exit(run.status ?? 1);

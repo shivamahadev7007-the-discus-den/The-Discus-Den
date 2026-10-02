@@ -124,7 +124,7 @@ function stripOffer(text: string): string {
 
 const RE = {
   promptAttack:
-    /\b(ignore\s+(all\s+|any\s+|your\s+|the\s+|previous\s+|prior\s+|above\s+|these\s+)*(rules|instructions|prompts?|guidelines|restrictions)|disregard\s+(your|all|the|previous)|forget\s+(your|all|previous|the)\s+(rules|instructions)|pretend\s+(to\s+be|you|you're|that)|role\s?-?play|act\s+as|you\s+are\s+now|from\s+now\s+on\s+you|system\s+prompt|developer\s+mode|jailbreak|dan\s+mode|reveal\s+(your\s+)?(prompt|instructions|rules)|what\s+are\s+your\s+(rules|instructions)|show\s+(me\s+)?your\s+(prompt|instructions|rules)|override|admin\s+mode|sudo|new\s+instructions|new\s+rule|repeat\s+after\s+me|repeat\s+everything|as\s+an?\s+admin|i\s+authori[sz]e\s+you|internal\s+(quantity|data|figures)|translate\s+your\s+(instructions|rules|prompt)|rules\s+ellam|marandhu\w*)\b|<\/?system>|^(system|say)\s*:/,
+    /\b(ignore\s+(all\s+|any\s+|your\s+|the\s+|previous\s+|prior\s+|above\s+|these\s+)*(rules|instructions|prompts?|guidelines|restrictions)|disregard\s+(your|all|the|previous)|forget\s+(your|all|previous|the)\s+(rules|instructions)|pretend\s+(to\s+be|you|you're|that)|role\s?-?play|act\s+as|you\s+are\s+now|from\s+now\s+on\s+you|system\s+prompt|developer\s+mode|jailbreak|dan\s+mode|reveal\s+(your\s+)?(prompt|instructions|rules)|what\s+are\s+your\s+(rules|instructions)|show\s+(me\s+)?your\s+(prompt|instructions|rules)|override|admin\s+mode|sudo|new\s+instructions|new\s+rule|repeat\s+after\s+me|repeat\s+everything|as\s+an?\s+admin|i\s+authori[sz]e\s+you|internal\s+(quantity|data|figures)|translate\s+your\s+(instructions|rules|prompt)|rules\s+ellam|marandhu\w*|output\s+(the\s+)?(word|text|phrase|string)|for\s+testing)\b|<\/?system>|^(system|say)\s*:/,
   discount:
     /\b(discount|discounts|coupon|coupons|promo|promocode|voucher|vouchers|offer|offers|cashback|referral|any\s+deal|deals|first[\s-]?time\s+(code|offer|discount)|(discount|coupon|promo|promotional|offer|referral|voucher|first[\s-]?time|friend'?s?|secret|special|cart)\s+codes?|(the|a|any|your|that|this)\s+code|code\s+(is|for)|\d+\s*%\s*off|\d+\s*(rupees|rs)\s+off)\b|(₹|\brs\.?\s*)\s*\d[\d,]*\s*off\b/,
   /** FAQ 22: a claimed promise/offer ("Shiva said...", "you offered...", "apply it"). */
@@ -146,7 +146,7 @@ const RE = {
   sickOften: /\b(sick|ill|diseased?)\b[^?.]*\b(often|usually|frequently|common|lot)\b|\byour\s+fish\b[^?.]*\b(sick|ill|diseased?)\b/,
   /** FAQ 23: off-topic requests. */
   offTopic:
-    /\b(python|javascript|typescript|java|html|css|sql|programming|coding|code\s+(for|in|to)|write\s+(me\s+)?(a\s+|an\s+|some\s+)?(code|program|script|essay|poem|story|letter|song|email|article)|homework|assignment|exam|essay|weather|forecast|raining|rain\s+today|news|headlines?|election|politics|cricket|ipl|football|movie|movies|film|recipe|joke|jokes|capital\s+of|president|prime\s+minister|bitcoin|crypto|stock\s+market|share\s+price|girlfriend|boyfriend|relationship|horoscope|astrology|translate|math|maths)\b/,
+    /\b(python|javascript|typescript|java|html|css|sql|programming|coding|code\s+(for|in|to)|write\s+(me\s+)?(a\s+|an\s+|some\s+)?(code|program|script|essay|poem|story|letter|song|email|article)|homework|assignment|exam|essay|weather|forecast|raining|rain\s+today|news|headlines?|election|politics|cricket|ipl|football|movie|movies|film|recipe|joke|jokes|capital\s+of|president|prime\s+minister|bitcoin|crypto|stock\s+market|share\s+price|girlfriend|boyfriend|relationship|horoscope|astrology|translate|math|maths|stupid|idiot|idiots|useless|dumb|moron|fuck\w*|shit\w*|bastard|bloody|loosu|waste\s+bot|naaye|poda|podi)\b/,
   fishCore: /\b(discus|fish|fishes|aquarium|tank|strains?|pellets?|bloodworms?|order|delivery|shipping|pickup)\b/,
   paymentConfirm:
     /\b(paid|have\s+paid|payment\s+(done|sent|made|completed)|sent\s+(the\s+)?(money|payment|amount)|transferred|did\s+you\s+(get|receive)|received\s+(my|the)\s+(payment|money)|is\s+this\s+(the\s+)?(right|correct|your)|confirm\s+(the\s+|my\s+)?(number|upi|payment|account)|gpay\s+number|upi\s+number|payment\s+number|upi\s+id|account\s+(number|details)|bank\s+details|ifsc)\b/,
@@ -172,26 +172,27 @@ const RE = {
     /\b(month|months|\d{2,}\s+days|free\s+for|longer|extend|beyond|waive|discount\s+on)\b/,
   goatHeart: /\b(goat\s*heart|ghm)\b/,
   food:
-    /\b(food|foods|pellets?|frozen|bloodworms?|blood\s+worms?|heart\s+mix|beef\s*heart|buffalo\s*heart|bhm|provit)\b/,
+    /\b(food|foods|pellets?|frozen|bloodworms?|blood\s+worms?|heart\s+mix|beef\s*heart|buffalo\s*heart|bhm|provit|feed|what\s+to\s+feed|saapadu)\b/,
   pairSingle: /\b(pair\s+or\s+(a\s+)?single|single\s+or\s+(a\s+)?pair|buy\s+a\s+pair|should\s+i\s+(get|buy)\s+(a\s+)?(pair|single|group))\b/,
   perPiece: /\b(per\s+(fish|piece|pair|pc)|each|for\s+a\s+pair|pair\s+price|price\s+for\s+(a\s+)?pair|is\s+(that|this|the\s+price)\s+(for\s+)?(one|a\s+pair))\b/,
   beginner: /\b(beginner|beginners|starter|first\s+(time|discus|tank)|new\s+to\s+discus|easy\s+(strain|discus|one)|hardy|good\s+for\s+(a\s+)?(beginner|start))\b/,
   shipCost:
-    /\b((shipping|delivery|courier|transport|train)\s+(cost|charge|charges|fee|fees|price|rate)|how\s+much\s+(is\s+|for\s+)?(the\s+)?(shipping|delivery|courier))\b/,
+    /\b((shipping|delivery|courier|transport|train)\s+(cost|charge|charges|fee|fees|price|rate)|how\s+much\s+(is\s+|for\s+)?(the\s+)?(shipping|delivery|courier)|(shipping|delivery|courier)\s+(is\s+)?(included|extra|free|charged)|includ\w*\b[^?.]*\b(shipping|delivery|courier)|(shipping|delivery)\s+(charge|cost)s?\s+(extra|included))\b/,
   shipHow:
     /\b((when|how)\s+(do|will|would|does)\s+(you|it|they|the\s+fish)\s+(ship|deliver|dispatch|arrive|send|come)|how\s+(is|are)\s+(it|they|fish)\s+(shipped|delivered|sent)|shipping\s+(process|method|time)|delivery\s+time|how\s+long\s+(does|will)\s+(shipping|delivery))\b/,
   ship:
     /\b(ship|ships|shipping|deliver|delivery|courier|send\s+(?:\w+\s+){0,3}to|transport|parcel|anuppu\w*|anupp\w*|anupuv\w*|anuppa\w*|varuma)\b/,
   pickup: /\b(pick\s?-?up|pickup|collect\s+(in|from|at)|self\s+pick|pickup\s+irukka)\b/,
   visit:
-    /\b(visit|address|location|where\s+are\s+you|where\s+is\s+(the\s+)?(den|shop|store)|timings?|opening\s+hours|hours|open\s+(today|now)|come\s+to\s+(your|the)\s+(shop|store|place|den)|your\s+(shop|store)|do\s+you\s+have\s+a\s+(shop|store))\b/,
-  quarantine: /\bquarantin\w*/,
+    /\b(visit|address|location|where\s+are\s+you|where\s+is\s+(the\s+)?(den|shop|store)|timings?|opening\s+hours|hours|open\s+(today|now)|come\s+to\s+(your|the)\s+(shop|store|place|den)|come\s+(and\s+|to\s+)?(see|check|look\s+at|view)|see\s+(the\s+|your\s+|them\s+)?(fish\s+)?(in\s+person|before\s+(buying|i\s+buy|ordering))|in\s+person|before\s+buying|your\s+(shop|store)|do\s+you\s+have\s+a\s+(shop|store))\b/,
+  quarantine:
+    /\bquarantin\w*|\b(are|is)\s+(the\s+|your\s+|these\s+)?(fish|discus)\s+(healthy|in\s+good\s+health|disease[\s-]?free|strong)\b|\bhealthy\s+(fish|discus|stock)\b|\bhealth\s+(of\s+)?(the\s+|your\s+)?(fish|discus)\b/,
   ordering:
     /\b(how\s+(do|can|to)\s+i\s+(order|buy|purchase)|how\s+to\s+(order|buy|purchase)|ordering|place\s+(an\s+)?order|order\s+process|cart)\b/,
   care:
     /\b(care|tips|how\s+to\s+(keep|maintain|look\s+after|raise)|maintenance|water\s+change|water\s+changes|temperature|temp|ph|feeding|how\s+often|tank\s+size|tank\s+mates|setup|set\s+up)\b/,
   price:
-    /\b(price|prices|pricing|cost|costs|rate|rates|how\s+much|evlo|evvalavu|evlavu|evalo|evlo\s+aagum|vilai|price\s+enna|enna\s+(price|rate|vilai)|rupees|rs|inr)\b|₹/,
+    /\b(price|prices|pricing|cost|costs|rate|rates|how\s+much|evlo|evvalavu|evlavu|evalo|evlo\s+aagum|vilai|price\s+enna|enna\s+(price|rate|vilai)|rupees|rs|inr|cheapest|lowest\s+price|least\s+expensive|most\s+expensive|costliest|affordable|budget)\b|₹/,
   available:
     /\b(i\s+want|looking\s+for|want\s+to\s+buy|interested\s+in)\b[^?.]*\b(fish|discus|pair)\b|\b(available|availability|in\s+stock|what\s+(fish|discus|strains?)|which\s+(fish|discus|strains?)|strains?|sizes?|what\s+do\s+you\s+have|show\s+me|list|catalog|catalogue|irukka|irukku|irukkaa|iruka|iruku|enna\s+(fish|discus|stock|meen)|endha\s+(fish|discus)|fish\s+list|stock)\b/,
   greeting:
@@ -720,210 +721,411 @@ function shippingAnswer(state: ChatState, t: string): Turn {
   return { reply: ANSWERS.shipInStates, intent: "ship_general" };
 }
 
-/** Normal (non-handoff) routing. Returns null when nothing matched. */
-async function routeIntent(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
-  // --- Safety first: these always win, whatever else the message says. ---
-  if (RE.promptAttack.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.promptAttack, intent: "prompt_attack" };
-  }
-  // FAQ 23: off-topic (code, weather, news, homework...). Don't attempt it, don't fall back to an FAQ.
-  if (RE.offTopic.test(t) && !RE.fishCore.test(t) && !/\b(discount|coupon|promo|offers?|first[\s-]?time|voucher|referral|cart)\b/.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.offTopic, intent: "off_topic" };
-  }
-  // FAQ 22: claimed promises/offers win over holding (FAQ 14) and discounts (FAQ 19).
+// ---------------------------------------------------------------------------
+// Intent priority table
+//
+// Every visitor message is checked against INTENT_RULES top to bottom; the first
+// rule whose test() passes (and whose run() returns a Turn) answers. The order is
+// the contract:
+//   1. safety   - prompt attacks, dead-on-arrival reports, mortality, safe-arrival
+//                 guarantees, refund policy, claimed offers, payment details,
+//                 discount codes, sick fish, internal figures, "are you a bot",
+//                 talk to Shiva. These win whatever else the message says.
+//   2. offer    - "yes"/"no" to the offer made in the previous reply.
+//   3. faq      - the answer-pack FAQs. Skipped when the message is plainly
+//                 off-topic (an off-topic word and no business word), so
+//                 "bitcoin price" or "stock market" never reach the price list.
+//   4. smalltalk
+//   5. offtopic - FAQ 23.
+//   6. fallback - FAQ 24 clarifying question (never "I'm not sure").
+// ---------------------------------------------------------------------------
+
+type Msg = { state: ChatState; raw: string; t: string; ctx: Ctx; offTopic: boolean };
+type RuleTier = "safety" | "offer" | "faq" | "smalltalk" | "offtopic" | "fallback";
+type IntentRule = {
+  id: string;
+  tier: RuleTier;
+  /** Answer-pack reference, for docs and tests. */
+  faq: string;
+  test: (m: Msg) => boolean;
+  run: (m: Msg) => Turn | null | Promise<Turn | null>;
+};
+
+const DEATH_REPORT = /\b(died|dead|doa|passed\s+away|not\s+alive|didn'?t\s+survive|did\s+not\s+survive|no\s+longer\s+alive)\b/;
+const ARRIVAL_CONTEXT =
+  /\b(arriv\w*|in\s+the\s+(bag|box|packet|pack|parcel|cover|carton)|on\s+arrival|doa|when\s+(it|they|i)\s+(came|reached|got|opened|received)|after\s+(delivery|unboxing|opening)|unbox\w*|received|delivered|reached|my\s+(fish|discus|order|parcel|pair|ones?)|our\s+(fish|order)|i\s+(have|took|recorded|shot)\s+(the\s+|a\s+)?video|video)\b/;
+const HYPOTHETICAL = /\b(what\s+(happens\s+)?if|in\s+case|suppose|if\s+(a|the|any|my)\b|would\s+you|do\s+you\s+(refund|replace))\b/;
+const MORTALITY_TIME =
+  /\b(last|this|past|previous)\s+(week|month|year|batch|shipment|lot|time)|\b(recently|yesterday|today|so\s+far|lately|any|did\s+any|have\s+any|were\s+any|in\s+your\s+tanks?|with\s+you)\b/;
+const GUARANTEE_WORD = /\b(guarantee\w*|surely|for\s+sure|definitely|safe|safely|alive|survive\w*|in\s+good\s+condition|without\s+(dying|loss))\b/;
+const TRAVEL_WORD = /\b(arriv\w*|reach\w*|deliver\w*|ship\w*|transit|journey|travel\w*|courier|send|sent|come|trip|train)\b/;
+const EQUIPMENT =
+  /\b(sell|have|stock|get|buy|provide)\b[^?.]*\b(filters?|heaters?|lights?|lighting|equipment|accessories|substrate|gravel|decorations?|decor|driftwood|co2|air\s+pumps?|pumps?|(fish\s+)?tanks\s+(or|and)|aquariums\s+(or|and)|glass\s+tanks?)\b/;
+const QR_PAYMENT = /\bqr(\s*code)?\b/;
+const CODE_QUALIFIER =
+  /\b(work|works|working|worked|valid|validity|apply|applied|applies|use|used|usable|accept\w*|expired?|still|aaguma|aagum|aagudha|aagutha|velai|velaiseyyuma|irukka|irukku|iruka|enna|discount|coupon|promo|first[\s-]?time|offer|cart|checkout)\b/;
+const PROGRAMMING = /\b(python|javascript|typescript|java|html|css|sql|program\w*|coding|script|write|function|bug|compile|source)\b/;
+const BUSINESS_WORD =
+  /\b(discus|fish|fishes|aquarium|tank|strains?|pellets?|bloodworms?|food|order|orders|cart|delivery|deliver|shipping|ship|pickup|pay|payment|gpay|upi|buy|shiva|tdd|den|quarantine|refund|discount|coupon|promo)\b/;
+
+/** FAQ 10: a visitor reporting fish that arrived dead (or claiming the refund for it). */
+function isDoaReport(t: string): boolean {
+  if (HYPOTHETICAL.test(t) && !/\b(my|our)\s+(fish|discus|order|parcel)\b|\bi\s+have\b/.test(t)) return false;
+  if (DEATH_REPORT.test(t) && ARRIVAL_CONTEXT.test(t)) return true;
+  // "refund approved right? I have the video" without a death word.
+  return /\brefund\b/.test(t) && /\b(video|unbox\w*|arriv\w*|in\s+the\s+bag)\b/.test(t) && !HYPOTHETICAL.test(t);
+}
+
+/** FAQ 21: questions about deaths or losses at The Discus Den (not the visitor's own fish). */
+function isMortality(t: string): boolean {
+  if (RE.sickOften.test(t)) return true;
+  if (!RE.mortalityWord.test(t)) return false;
+  if (RE.mortalityTamil.test(t) || /\bmortality\b|\bloss(es)?\s+rate\b|\bdeath\s+rate\b|\blost\s+any\b|\bany\s+(losses|deaths)\b/.test(t)) return true;
+  return (RE.mortalityContext.test(t) || MORTALITY_TIME.test(t)) && !RE.mortalityPersonal.test(t);
+}
+
+/** FAQ 5/10/25: "will they surely arrive safe / guarantee safe arrival". */
+function isGuarantee(t: string): boolean {
+  if (RE.claimVerb.test(t)) return false;
+  if (/\b(safe|live)\s+arrival\b|\barrive\s+(safe|safely|alive)\b/.test(t)) return true;
+  return GUARANTEE_WORD.test(t) && TRAVEL_WORD.test(t);
+}
+
+/** FAQ 22: a claimed promise or offer ("Shiva said...", "you offered...", "apply it"). */
+function isClaimedOffer(t: string): boolean {
   const isQuestionAsk = /^(can|could|will|would|do|does|is|any|how)\b/.test(t);
-  if (
-    (RE.claimVerb.test(t) && RE.offerish.test(t)) ||
-    RE.claimApply.test(t) ||
-    (RE.claimFreeMonth.test(t) && !isQuestionAsk) ||
-    RE.refundSure.test(t)
-  ) {
-    addFlag(state, "CLAIMED OFFER");
-    if (/\b(hold|holding|month)\b/.test(t)) addFlag(state, "LONG HOLD");
-    if (RE.refundSure.test(t)) addFlag(state, "GUARANTEE ASKED");
-    if (/\b(off|free|discount|offer|cheaper|less|code|coupon|bonus|gift|waive\w*)\b|%|₹|\brs\.?\s*\d/.test(t)) addFlag(state, "DISCOUNT ASKED");
-    state.pendingOffer = "handoff";
-    return { reply: ANSWERS.claimedOffer, intent: "claimed_offer" };
-  }
-  // FAQ 21: mortality. Neutral, never yes/no, never numbers.
-  if (
-    (RE.mortalityWord.test(t) && (RE.mortalityTamil.test(t) || /\bmortality\b|\bloss(es)?\s+rate\b|\bdeath\s+rate\b/.test(t) || (RE.mortalityContext.test(t) && !RE.mortalityPersonal.test(t)))) ||
-    RE.sickOften.test(t)
-  ) {
-    addFlag(state, "MORTALITY ASKED");
-    state.pendingOffer = "handoff";
-    return { reply: ANSWERS.mortality, intent: "mortality" };
-  }
-  if (RE.discount.test(t) || COUPON_TOKEN.test(raw)) {
-    addFlag(state, "DISCOUNT ASKED");
-    state.pendingOffer = "handoff";
-    return { reply: `${ANSWERS.discount}\n\n${VOLUME_DISCOUNT_LINE}`, intent: "discount" };
-  }
-  if (RE.paymentConfirm.test(t) || (RE.payment.test(t) && (digitCount(raw) >= 6 || /@/.test(raw)))) {
-    addFlag(state, "PAYMENT ASKED");
-    state.pendingOffer = null;
-    return { reply: ANSWERS.paymentDetails, intent: "payment_details" };
-  }
-  if (RE.doaQuestion.test(t)) {
-    addFlag(state, "GUARANTEE ASKED");
-    state.pendingOffer = null;
-    return { reply: ANSWERS.doa, intent: "doa_policy" };
-  }
-  if (RE.doaReport.test(t)) {
-    addFlag(state, "DOA CLAIM");
-    return startHandoff(state, raw, ANSWERS.doa);
-  }
-  if (RE.sick.test(t)) {
-    addFlag(state, "SICK FISH");
-    state.pendingOffer = "handoff";
-    return { reply: ANSWERS.sickFish, intent: "sick_fish" };
-  }
-  if (RE.internal.test(t)) {
-    state.pendingOffer = "narrow";
-    return { reply: ANSWERS.noInternalFigures, intent: "internal_figures" };
-  }
-  if (RE.human.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.areYouHuman, intent: "are_you_human" };
-  }
-  if (RE.talkToShiva.test(t)) {
-    return startHandoff(state, raw);
-  }
+  return (RE.claimVerb.test(t) && RE.offerish.test(t)) || RE.claimApply.test(t) || (RE.claimFreeMonth.test(t) && !isQuestionAsk);
+}
 
-  // --- Offers from the previous reply ---
-  const shortReply = t.split(" ").length <= 5;
-  if (state.pendingOffer === "handoff" && RE.affirm.test(t) && shortReply) {
-    return startHandoff(state, raw);
-  }
-  if (state.pendingOffer && RE.negate.test(t) && shortReply) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.handoffDeclined, intent: "offer_declined" };
-  }
-  if (state.pendingOffer === "narrow" && RE.affirm.test(t) && !RE.available.test(t) && !COLOURS.some((c) => t.includes(c))) {
-    state.pendingOffer = "narrow";
-    return { reply: "Sure. Which size or colour would you like?", intent: "narrow_ask" };
-  }
+/**
+ * FAQ 19: discount / coupon / first-time code questions, in English or Tanglish.
+ * Generic patterns only: the visitor may type a real code word themselves, and
+ * no code word is ever listed here.
+ */
+function isDiscountCode(t: string, raw: string): boolean {
+  if (QR_PAYMENT.test(t)) return false;
+  const discountWord = /\b(discount|coupon|promo|voucher|offers?|first[\s-]?time|referral|cashback)\b|%\s*off/.test(t);
+  if (PROGRAMMING.test(t) && !discountWord) return false;
+  if (RE.discount.test(t) || COUPON_TOKEN.test(raw)) return true;
+  if (!/\bcodes?\b/.test(t) || PROGRAMMING.test(t)) return false;
+  if (CODE_QUALIFIER.test(t)) return true;
+  // "<token> code?" / "is <token> code ..." asked as a question.
+  const asked = raw.includes("?") || /^(is|does|will|can|what|which|any|ithu|indha)\b/.test(t);
+  return asked && /\b[a-z0-9]{3,}\s+codes?\b/.test(t);
+}
 
-  // --- FAQs ---
-  if (RE.reseller.test(t)) {
-    state.pendingOffer = "handoff";
-    return { reply: ANSWERS.reseller, intent: "reseller" };
+function isPaymentDetails(t: string, raw: string): boolean {
+  return RE.paymentConfirm.test(t) || (RE.payment.test(t) && (digitCount(raw) >= 6 || /@/.test(raw)));
+}
+
+function guaranteeAnswer(state: ChatState, t: string): Turn {
+  addFlag(state, "GUARANTEE ASKED");
+  const place = findPlace(t);
+  if (place) state.lead.stateName ??= place.state;
+  if (!place) {
+    state.pendingOffer = null;
+    return { reply: ANSWERS.doa, intent: "guarantee" };
   }
-  if (RE.holding.test(t) && !RE.ship.test(t)) {
-    state.tags.history ??= "first-timer";
-    if (RE.holdingBeyond.test(t)) {
-      addFlag(state, "LONG HOLD");
+  if (place.zone === "in") {
+    state.pendingOffer = null;
+    return { reply: join(ANSWERS.shipInStates, ANSWERS.doa), intent: "guarantee_in_states" };
+  }
+  addFlag(state, "OUTSIDE 8 STATES");
+  state.pendingOffer = "handoff";
+  if (place.zone === "other") return { reply: ANSWERS.shipOtherState, intent: "guarantee_other_state" };
+  addFlag(state, "REMOTE");
+  if (place.zone === "remote") return { reply: ANSWERS.shipRemote, intent: "guarantee_remote" };
+  return { reply: ANSWERS.shipAbroad, intent: "guarantee_abroad" };
+}
+
+const sizeAskRe = /(\d+(?:\.\d+)?)\s*(?:"|inch|inches)|\b(small|big|large|adult|juvenile)\s+(ones?|fish|discus|size)\b/;
+const hasColour = (t: string) => COLOURS.some((c) => new RegExp(`\\b${c}\\b`).test(t));
+
+export const INTENT_RULES: readonly IntentRule[] = [
+  // ---- 1. safety ----
+  {
+    id: "prompt_attack", tier: "safety", faq: "Rules: prompt attacks",
+    test: (m) => RE.promptAttack.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.promptAttack, intent: "prompt_attack" }; },
+  },
+  {
+    id: "doa_report", tier: "safety", faq: "FAQ 10 (report)",
+    test: (m) => isDoaReport(m.t),
+    run: ({ state, raw }) => { addFlag(state, "DOA CLAIM"); return startHandoff(state, raw, ANSWERS.doa); },
+  },
+  {
+    id: "mortality", tier: "safety", faq: "FAQ 21",
+    test: (m) => isMortality(m.t),
+    run: ({ state }) => { addFlag(state, "MORTALITY ASKED"); state.pendingOffer = "handoff"; return { reply: ANSWERS.mortality, intent: "mortality" }; },
+  },
+  {
+    id: "guarantee", tier: "safety", faq: "FAQ 5 / 10 / 25",
+    test: (m) => isGuarantee(m.t),
+    run: ({ state, t }) => guaranteeAnswer(state, t),
+  },
+  {
+    id: "doa_policy", tier: "safety", faq: "FAQ 10",
+    test: (m) => RE.doaQuestion.test(m.t) || (RE.refundSure.test(m.t) && !RE.claimVerb.test(m.t)),
+    run: ({ state, t }) => {
+      addFlag(state, "GUARANTEE ASKED");
+      state.pendingOffer = RE.refundSure.test(t) ? "handoff" : null;
+      return { reply: ANSWERS.doa, intent: "doa_policy" };
+    },
+  },
+  {
+    id: "claimed_offer", tier: "safety", faq: "FAQ 22",
+    test: (m) => isClaimedOffer(m.t),
+    run: ({ state, t }) => {
+      addFlag(state, "CLAIMED OFFER");
+      if (/\b(hold|holding|month)\b/.test(t)) addFlag(state, "LONG HOLD");
+      if (/\brefund\b/.test(t)) addFlag(state, "GUARANTEE ASKED");
+      if (/\b(off|free|discount|offer|cheaper|less|code|coupon|bonus|gift|waive\w*)\b|%|₹|\brs\.?\s*\d/.test(t)) addFlag(state, "DISCOUNT ASKED");
       state.pendingOffer = "handoff";
-      return { reply: `${ANSWERS.holding} ${ANSWERS.holdingBeyond}`, intent: "holding_beyond" };
-    }
-    state.pendingOffer = null;
-    return { reply: ANSWERS.holding, intent: "holding" };
-  }
-  if (RE.goatHeart.test(t)) return foodAnswer(state, ctx, true);
-  if (RE.food.test(t)) return foodAnswer(state, ctx, false);
-  if (RE.pairSingle.test(t)) {
-    state.pendingOffer = "handoff";
-    return { reply: ANSWERS.pairOrSingle, intent: "pair_or_single" };
-  }
-  if (RE.perPiece.test(t) && RE.price.test(t) === false && !matchAny(raw)) {
-    state.pendingOffer = null;
-    return { reply: `${PER_PIECE_LINE} ${VOLUME_DISCOUNT_LINE}`, intent: "per_piece" };
-  }
-  if (RE.beginner.test(t) && /\b(strain|which|what|suggest|recommend|good|best|start|fish|discus)\b/.test(t)) {
-    return beginnerAnswer(state, ctx);
-  }
-  if (RE.shipCost.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.shippingCost, intent: "ship_cost" };
-  }
-  if (RE.pickup.test(t)) {
-    state.lead.delivery ??= "Chennai pickup";
-    state.pendingOffer = "handoff";
-    return { reply: ANSWERS.pickup, intent: "pickup" };
-  }
-  if (RE.shipHow.test(t) && !findPlace(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.shippingHow, intent: "ship_how" };
-  }
-  if (RE.ship.test(t)) return shippingAnswer(state, t);
-  if (RE.visit.test(t)) {
-    state.pendingOffer = "handoff";
-    return { reply: ANSWERS.visit, intent: "visit" };
-  }
-  if (RE.quarantine.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.quarantine, intent: "quarantine" };
-  }
-  if (RE.ordering.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.ordering, intent: "ordering" };
-  }
-  if (RE.payment.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.howToPay, intent: "how_to_pay" };
-  }
-  if (RE.price.test(t)) {
-    if (RE.perPiece.test(t) && !matchAny(raw)) {
+      return { reply: ANSWERS.claimedOffer, intent: "claimed_offer" };
+    },
+  },
+  {
+    id: "payment_details", tier: "safety", faq: "Rule 5a",
+    test: (m) => isPaymentDetails(m.t, m.raw),
+    run: ({ state }) => { addFlag(state, "PAYMENT ASKED"); state.pendingOffer = null; return { reply: ANSWERS.paymentDetails, intent: "payment_details" }; },
+  },
+  {
+    id: "payment_qr", tier: "safety", faq: "FAQ 7",
+    test: (m) => QR_PAYMENT.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.howToPay, intent: "how_to_pay" }; },
+  },
+  {
+    id: "discount", tier: "safety", faq: "FAQ 19",
+    test: (m) => isDiscountCode(m.t, m.raw),
+    run: ({ state }) => {
+      addFlag(state, "DISCOUNT ASKED");
+      state.pendingOffer = "handoff";
+      return { reply: `${ANSWERS.discount}\n\n${VOLUME_DISCOUNT_LINE}`, intent: "discount" };
+    },
+  },
+  {
+    id: "doa_refund", tier: "safety", faq: "FAQ 10 (report)",
+    test: (m) => RE.doaReport.test(m.t),
+    run: ({ state, raw }) => { addFlag(state, "DOA CLAIM"); return startHandoff(state, raw, ANSWERS.doa); },
+  },
+  {
+    id: "sick_fish", tier: "safety", faq: "FAQ 18",
+    test: (m) => RE.sick.test(m.t),
+    run: ({ state }) => { addFlag(state, "SICK FISH"); state.pendingOffer = "handoff"; return { reply: ANSWERS.sickFish, intent: "sick_fish" }; },
+  },
+  {
+    id: "internal_figures", tier: "safety", faq: "Rules 1-3",
+    test: (m) => RE.internal.test(m.t),
+    run: ({ state }) => { state.pendingOffer = "narrow"; return { reply: ANSWERS.noInternalFigures, intent: "internal_figures" }; },
+  },
+  {
+    id: "are_you_human", tier: "safety", faq: "Rules: are you a person",
+    test: (m) => RE.human.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.areYouHuman, intent: "are_you_human" }; },
+  },
+  {
+    id: "talk_to_shiva", tier: "safety", faq: "Handoff",
+    test: (m) => RE.talkToShiva.test(m.t),
+    run: ({ state, raw }) => startHandoff(state, raw),
+  },
+
+  // ---- 2. replies to the previous offer ----
+  {
+    id: "offer_accept", tier: "offer", faq: "Handoff",
+    test: ({ state, t }) => state.pendingOffer === "handoff" && RE.affirm.test(t) && t.split(" ").length <= 5,
+    run: ({ state, raw }) => startHandoff(state, raw),
+  },
+  {
+    id: "offer_decline", tier: "offer", faq: "Handoff",
+    test: ({ state, t }) => Boolean(state.pendingOffer) && RE.negate.test(t) && t.split(" ").length <= 5,
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.handoffDeclined, intent: "offer_declined" }; },
+  },
+  {
+    id: "narrow_ask", tier: "offer", faq: "Quick tap",
+    test: ({ state, t }) => state.pendingOffer === "narrow" && RE.affirm.test(t) && !RE.available.test(t) && !COLOURS.some((c) => t.includes(c)),
+    run: ({ state }) => { state.pendingOffer = "narrow"; return { reply: "Sure. Which size or colour would you like?", intent: "narrow_ask" }; },
+  },
+
+  // ---- 3. FAQs ----
+  {
+    // Equipment we don't sell (filters, heaters, tanks...): FAQ 23 redirect.
+    id: "equipment", tier: "faq", faq: "FAQ 23",
+    test: (m) => EQUIPMENT.test(m.t) && !/\b(discus|fish|food|pellets?)\b/.test(m.t.replace(/\bfish\s+tanks?\b/, "")),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.offTopic, intent: "off_topic" }; },
+  },
+  {
+    id: "reseller", tier: "faq", faq: "FAQ 17",
+    test: (m) => RE.reseller.test(m.t),
+    run: ({ state }) => { state.pendingOffer = "handoff"; return { reply: ANSWERS.reseller, intent: "reseller" }; },
+  },
+  {
+    id: "holding", tier: "faq", faq: "FAQ 14",
+    test: (m) => RE.holding.test(m.t) && !RE.ship.test(m.t),
+    run: ({ state, t }) => {
+      state.tags.history ??= "first-timer";
+      if (RE.holdingBeyond.test(t)) {
+        addFlag(state, "LONG HOLD");
+        state.pendingOffer = "handoff";
+        return { reply: `${ANSWERS.holding} ${ANSWERS.holdingBeyond}`, intent: "holding_beyond" };
+      }
       state.pendingOffer = null;
-      return { reply: `${PER_PIECE_LINE} ${VOLUME_DISCOUNT_LINE}`, intent: "per_piece" };
-    }
-    return (await priceOrAvailability(state, raw, t, ctx, "price"))!;
-  }
-  if (RE.available.test(t)) return (await priceOrAvailability(state, raw, t, ctx, "available"))!;
-  if (RE.care.test(t)) {
-    state.pendingOffer = "handoff";
-    return { reply: ANSWERS.careTips, intent: "care_tips" };
-  }
+      return { reply: ANSWERS.holding, intent: "holding" };
+    },
+  },
+  { id: "goat_heart", tier: "faq", faq: "FAQ 16", test: (m) => RE.goatHeart.test(m.t), run: ({ state, ctx }) => foodAnswer(state, ctx, true) },
+  { id: "food", tier: "faq", faq: "FAQ 15", test: (m) => RE.food.test(m.t), run: ({ state, ctx }) => foodAnswer(state, ctx, false) },
+  {
+    id: "pair_or_single", tier: "faq", faq: "FAQ 4",
+    test: (m) => RE.pairSingle.test(m.t),
+    run: ({ state }) => { state.pendingOffer = "handoff"; return { reply: ANSWERS.pairOrSingle, intent: "pair_or_single" }; },
+  },
+  {
+    id: "per_piece", tier: "faq", faq: "FAQ 2 (per piece)",
+    test: (m) => RE.perPiece.test(m.t) && !matchAny(m.raw),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: `${PER_PIECE_LINE} ${VOLUME_DISCOUNT_LINE}`, intent: "per_piece" }; },
+  },
+  {
+    id: "beginner", tier: "faq", faq: "FAQ 3",
+    test: (m) => RE.beginner.test(m.t) && /\b(strain|which|what|suggest|recommend|good|best|start|fish|discus)\b/.test(m.t),
+    run: ({ state, ctx }) => beginnerAnswer(state, ctx),
+  },
+  {
+    id: "ship_cost", tier: "faq", faq: "FAQ 8",
+    test: (m) => RE.shipCost.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.shippingCost, intent: "ship_cost" }; },
+  },
+  {
+    id: "pickup", tier: "faq", faq: "FAQ 12",
+    test: (m) => RE.pickup.test(m.t),
+    run: ({ state }) => { state.lead.delivery ??= "Chennai pickup"; state.pendingOffer = "handoff"; return { reply: ANSWERS.pickup, intent: "pickup" }; },
+  },
+  {
+    id: "ship_how", tier: "faq", faq: "FAQ 9",
+    test: (m) => RE.shipHow.test(m.t) && !findPlace(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.shippingHow, intent: "ship_how" }; },
+  },
+  { id: "ship", tier: "faq", faq: "FAQ 5 / 25", test: (m) => RE.ship.test(m.t), run: ({ state, t }) => shippingAnswer(state, t) },
+  {
+    id: "visit", tier: "faq", faq: "FAQ 11",
+    test: (m) => RE.visit.test(m.t),
+    run: ({ state }) => { state.pendingOffer = "handoff"; return { reply: ANSWERS.visit, intent: "visit" }; },
+  },
+  {
+    id: "quarantine", tier: "faq", faq: "FAQ 13",
+    test: (m) => RE.quarantine.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.quarantine, intent: "quarantine" }; },
+  },
+  {
+    id: "ordering", tier: "faq", faq: "FAQ 6",
+    test: (m) => RE.ordering.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.ordering, intent: "ordering" }; },
+  },
+  {
+    id: "how_to_pay", tier: "faq", faq: "FAQ 7",
+    test: (m) => RE.payment.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.howToPay, intent: "how_to_pay" }; },
+  },
+  {
+    id: "price", tier: "faq", faq: "FAQ 2",
+    test: (m) => RE.price.test(m.t),
+    run: async ({ state, raw, t, ctx }) => {
+      if (RE.perPiece.test(t) && !matchAny(raw)) {
+        state.pendingOffer = null;
+        return { reply: `${PER_PIECE_LINE} ${VOLUME_DISCOUNT_LINE}`, intent: "per_piece" };
+      }
+      return priceOrAvailability(state, raw, t, ctx, "price");
+    },
+  },
+  { id: "available", tier: "faq", faq: "FAQ 1", test: (m) => RE.available.test(m.t), run: ({ state, raw, t, ctx }) => priceOrAvailability(state, raw, t, ctx, "available") },
+  {
+    id: "care_tips", tier: "faq", faq: "Quick tap: care tips",
+    test: (m) => RE.care.test(m.t),
+    run: ({ state }) => { state.pendingOffer = "handoff"; return { reply: ANSWERS.careTips, intent: "care_tips" }; },
+  },
+  {
+    // A strain, colour or size named on its own ("yellow diamonds?", "red ones", "any 5 inch?").
+    id: "strain_named", tier: "faq", faq: "FAQ 2 / 20",
+    test: (m) => strainWordsIn(m.t).length > 0 || sizeAskRe.test(m.t) || hasColour(m.t),
+    run: ({ state, raw, t, ctx }) =>
+      priceOrAvailability(state, raw, t, ctx, sizeAskRe.test(t) || COLOURS.some((c) => t.includes(c)) ? "available" : "strain"),
+  },
+  {
+    // Contact details typed out of the blue: start the handoff with them prefilled.
+    id: "contact_typed", tier: "faq", faq: "Handoff",
+    test: (m) => extractIndianMobile(m.raw) !== null,
+    run: ({ state, raw }) => startHandoff(state, raw),
+  },
+  {
+    id: "name_given", tier: "faq", faq: "Handoff",
+    test: (m) => /^(my\s+name\s+is|i\s+am|i'm|this\s+is)\s+/i.test(m.raw) && parseName(m.raw) !== null && !findPlace(m.t),
+    run: ({ state, raw }) => {
+      state.lead.name = parseName(raw)!;
+      state.pendingOffer = null;
+      return { reply: `Thanks, ${state.lead.name}. How can I help?`, intent: "name_given" };
+    },
+  },
+  {
+    // Self-location ("I'm in Delhi", "I live in Pune") answers "do you ship to my city?".
+    // A city name on its own (or inside an unrelated question) does not.
+    id: "self_location", tier: "faq", faq: "FAQ 5 / 25",
+    test: (m) => findPlace(m.t) !== null && /\b(i'?m|i\s+am|we\s+are|i\s+live|we\s+live|living|staying|based|from)\b|\b(la|le)\s+irukk\w*/.test(m.t),
+    run: ({ state, t }) => shippingAnswer(state, t),
+  },
 
-  // A strain, colour or size named on its own ("yellow diamonds?", "red ones", "any 5 inch?").
-  const sizeAsk = /(\d+(?:\.\d+)?)\s*(?:"|inch|inches)|\b(small|big|large|adult|juvenile)\s+(ones?|fish|discus|size)\b/.test(t);
-  if (strainWordsIn(t).length || sizeAsk || COLOURS.some((c) => new RegExp(`\\b${c}\\b`).test(t))) {
-    const r = await priceOrAvailability(state, raw, t, ctx, sizeAsk || COLOURS.some((c) => t.includes(c)) ? "available" : "strain");
-    if (r) return r;
-  }
+  // ---- 4. small talk ----
+  { id: "welcome", tier: "smalltalk", faq: "Welcome", test: (m) => RE.greeting.test(m.t), run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.welcome, intent: "welcome" }; } },
+  { id: "thanks", tier: "smalltalk", faq: "Small talk", test: (m) => RE.thanks.test(m.t), run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.thanks, intent: "thanks" }; } },
+  { id: "bye", tier: "smalltalk", faq: "Small talk", test: (m) => RE.bye.test(m.t), run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.bye, intent: "bye" }; } },
+  {
+    id: "ack", tier: "smalltalk", faq: "Small talk",
+    test: (m) => RE.affirm.test(m.t) || RE.negate.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.handoffDeclined, intent: "ack" }; },
+  },
 
-  // Contact details typed out of the blue: start the handoff with them prefilled.
-  if (extractIndianMobile(raw)) return startHandoff(state, raw);
-  if (/^(my\s+name\s+is|i\s+am|i'm|this\s+is)\s+/i.test(raw) && parseName(raw) && !findPlace(t)) {
-    state.lead.name = parseName(raw)!;
-    state.pendingOffer = null;
-    return { reply: `Thanks, ${state.lead.name}. How can I help?`, intent: "name_given" };
-  }
+  // ---- 5. off-topic (FAQ 23) ----
+  {
+    id: "off_topic", tier: "offtopic", faq: "FAQ 23",
+    test: (m) => m.offTopic,
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.offTopic, intent: "off_topic" }; },
+  },
 
-  // Self-location ("I'm in Delhi", "I live in Pune") answers "do you ship to my city?".
-  // A city name on its own (or inside an unrelated question) does not.
-  if (findPlace(t) && /\b(i'?m|i\s+am|we\s+are|i\s+live|we\s+live|living|staying|based|from)\b|\b(la|le)\s+irukk\w*/.test(t)) {
-    return shippingAnswer(state, t);
-  }
+  // ---- 6. fallback: FAQ 24 clarifying question ----
+  {
+    id: "unclear", tier: "fallback", faq: "FAQ 24",
+    test: () => true,
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.unclear, intent: "unclear" }; },
+  },
+];
 
-  // --- Small talk ---
-  if (RE.greeting.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.welcome, intent: "welcome" };
-  }
-  if (RE.thanks.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.thanks, intent: "thanks" };
-  }
-  if (RE.bye.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.bye, intent: "bye" };
-  }
-  if (RE.affirm.test(t) || RE.negate.test(t)) {
-    state.pendingOffer = null;
-    return { reply: ANSWERS.handoffDeclined, intent: "ack" };
-  }
+/** Rule ids in priority order (exported for docs and tests). */
+export const INTENT_PRIORITY: readonly string[] = INTENT_RULES.map((r) => r.id);
 
-  // --- Not covered: discus-ish -> offer handoff; otherwise redirect. ---
-  if (RE.discusish.test(t)) {
-    // FAQ 24: clarify instead of "I'm not sure".
-    state.pendingOffer = null;
-    return { reply: ANSWERS.unclear, intent: "unclear" };
+/** Plainly off-topic: an off-topic word and nothing about fish, orders or the den. */
+function isOffTopic(t: string): boolean {
+  return (RE.offTopic.test(t) || /^codes?\W*$/.test(t)) && !RE.fishCore.test(t) && !BUSINESS_WORD.test(t.replace(/^codes?\W*$/, ""));
+}
+
+const NO_CATALOG: CatalogLoader = { strains: async () => null, foods: async () => ({ frozen: null, pellets: null }) };
+
+/** The safety rule (if any) that a message triggers; used to interrupt a handoff. */
+export function safetyIntent(raw: string): string | null {
+  const t = norm(raw);
+  const m: Msg = { state: newChatState(), raw, t, ctx: { catalog: NO_CATALOG }, offTopic: false };
+  const rule = INTENT_RULES.find((r) => r.tier === "safety" && r.id !== "talk_to_shiva" && r.test(m));
+  return rule ? rule.id : null;
+}
+
+/** Normal (non-handoff) routing: first matching rule in INTENT_RULES wins. */
+async function routeIntent(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
+  const m: Msg = { state, raw, t, ctx, offTopic: isOffTopic(t) };
+  for (const rule of INTENT_RULES) {
+    if (rule.tier === "faq" && m.offTopic) continue;
+    if (!rule.test(m)) continue;
+    const turn = await rule.run(m);
+    if (turn) return turn;
   }
   state.pendingOffer = null;
-  return { reply: ANSWERS.offTopic, intent: "off_topic" };
+  return { reply: ANSWERS.unclear, intent: "unclear" };
 }
 
 /** Cheap check used before deciding a per-piece question is generic. */
@@ -942,11 +1144,15 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
     return { reply: ANSWERS.handoffDeclined, intent: "handoff_cancelled" };
   }
 
-  const answered = looksLikeAnswer(step, raw, t);
+  // Safety questions (mortality, safe arrival, DOA, claimed offers...) are always
+  // answered, even if they also parse as a field ("...last week" at the timeline step).
+  const safety = safetyIntent(raw);
+  const interrupt = safety !== null && !(step === "phone" && safety === "payment_details");
+  const answered = !interrupt && looksLikeAnswer(step, raw, t);
 
   // A question instead of an answer: answer it, then re-ask the same field.
   // Prompt attacks and other safety rules always take this path.
-  if (!answered && !RE.declineField.test(t)) {
+  if (interrupt || (!answered && !RE.declineField.test(t))) {
     const probe = newProbe(state);
     const r = await routeIntent(probe, raw, t, ctx);
     const generic = ["unsure", "unclear", "off_topic", "ack", "welcome", "thanks"].includes(r.intent);
@@ -964,6 +1170,10 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
     }
     if (r.intent === "prompt_attack") {
       return { reply: join(r.reply, askFor(step, state)), intent: "prompt_attack+handoff" };
+    }
+    // An unrecognised question at a free-text step: don't store it as the answer; ask again.
+    if (raw.includes("?") && (step === "pairSingle" || step === "delivery" || step === "timeline")) {
+      return { reply: join(ANSWERS.unclear, askFor(step, state)), intent: "unclear+handoff" };
     }
   }
 

@@ -111,7 +111,7 @@ export const ANSWERS = {
   doa:
     "If a fish arrives dead, we refund it promptly. Please record a clear unboxing video and send it to Shiva within 24 hours of arrival. Shiva reviews every claim personally.",
   visit:
-    "Store shopping and pickup in Chennai are possible by arrangement. Shiva will share the location and set a time with you. Shall I pass your details?",
+    "Store visits and pickup in Chennai are possible by arrangement. Shiva will share the location and set a time with you. Shall I pass your details?",
   pickup: "Chennai pickup is possible. Shiva sets a time with you personally. Want me to pass your details?",
   quarantine:
     "Every fish is quarantined, fed and watched before it leaves. We hold them until they're ready, and Shiva would rather refuse a shipment than send a stressed fish.",
