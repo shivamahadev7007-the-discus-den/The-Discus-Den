@@ -23,12 +23,13 @@ rmSync(workDir, { recursive: true, force: true });
 mkdirSync(compileSrc, { recursive: true });
 mkdirSync(outDir, { recursive: true });
 
-for (const name of ["front-desk.ts", "front-desk.test.ts", "send.ts"]) {
+for (const name of ["front-desk.ts", "front-desk.test.ts", "send.ts", "webhook.ts", "webhook.test.ts"]) {
   const src = join(srcDir, name);
   if (!existsSync(src)) continue;
   let code = readFileSync(src, "utf8");
   code = code.replaceAll('from "./front-desk.ts"', 'from "./front-desk.js"');
   code = code.replaceAll('from "./send.ts"', 'from "./send.js"');
+  code = code.replaceAll('from "./webhook.ts"', 'from "./webhook.js"');
   writeFileSync(join(compileSrc, name), code);
 }
 
@@ -66,13 +67,15 @@ if (tsc.status !== 0) {
   process.exit(tsc.status ?? 1);
 }
 
-const testJs = join(outDir, "front-desk.test.js");
-if (!existsSync(testJs)) {
-  console.error("compiled test missing:", testJs);
-  process.exit(1);
+const testFiles = ["front-desk.test.js", "webhook.test.js"].map((f) => join(outDir, f));
+for (const testJs of testFiles) {
+  if (!existsSync(testJs)) {
+    console.error("compiled test missing:", testJs);
+    process.exit(1);
+  }
 }
 
-const run = spawnSync(process.execPath, ["--test", testJs], {
+const run = spawnSync(process.execPath, ["--test", ...testFiles], {
   cwd: root,
   encoding: "utf8",
   env: process.env,
