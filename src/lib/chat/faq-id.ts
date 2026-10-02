@@ -9,6 +9,7 @@
 import { ANSWERS, PER_PIECE_LINE } from "./answers.ts";
 
 const FIXED: Array<[string, string]> = [
+  [ANSWERS.lossSafetyNet, "FAQ 26"],
   [ANSWERS.promptAttack, "attack"],
   [ANSWERS.mortality, "FAQ 21"],
   [ANSWERS.claimedOffer, "FAQ 22"],

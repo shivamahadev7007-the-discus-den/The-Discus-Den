@@ -55,6 +55,8 @@ export type ChatState = {
     phoneTries: number;
     nameTries: number;
     declined: HandoffStep[];
+    /** Set after the FAQ 26 reply ("Shall I pass your details to him?"): next message may be yes/no. */
+    awaitingConsent?: boolean;
   };
   lead: LeadData;
   tags: LeadTags;
@@ -645,7 +647,21 @@ async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx
       intent: "available_filtered_none",
     };
   }
-  const list = (filtered ?? cards).slice(0, 5);
+  let pool = filtered ?? cards;
+  // "cheapest discus?" / "anything under 1000 rupees?": lowest live prices first.
+  const budget = /\b(under|below|less\s+than|within|upto|up\s+to)\s*(₹|rs\.?|inr)?\s*(\d[\d,]*)/.exec(t);
+  if (budget || /\b(cheapest|lowest\s+price|least\s+expensive|budget|affordable)\b/.test(t)) {
+    const cap = budget ? Number(budget[3]!.replace(/,/g, "")) : Infinity;
+    pool = [...pool].filter((c) => c.price <= cap).sort((a, b) => a.price - b.price);
+    if (!pool.length) {
+      state.pendingOffer = "handoff";
+      return {
+        reply: "Nothing on our available page matches that right now. Full list: thediscusden.com/available. Want me to ask Shiva about it?",
+        intent: "available_filtered_none",
+      };
+    }
+  }
+  const list = pool.slice(0, 5);
   const head = kind === "price" ? `${PER_PIECE_LINE} ${ANSWERS.availableIntro}` : ANSWERS.availableIntro;
   state.pendingOffer = "narrow";
   return {
@@ -751,6 +767,99 @@ type IntentRule = {
   run: (m: Msg) => Turn | null | Promise<Turn | null>;
 };
 
+// ---------------------------------------------------------------------------
+// FAQ 26 loss safety net: any message about fish death, loss or a refund.
+// Stem / regex families, not sentences. Custom boundaries keep "diet",
+// "studied", "indeed", "dieffenbachia", "lossless" and "die-cast" out.
+// ---------------------------------------------------------------------------
+
+/** Idioms stripped before matching ("dead set on", "to die for", ...). */
+const LOSS_IDIOMS =
+  /\bdead\s+(set|easy|serious|seriously|cheap|simple|sure|tired|right|end|ringer|silent|quiet)\b|\bdie[\s-]?hards?\b|\bto\s+die\s+for\b|\bdying\s+(to|for)\s+(get|buy|see|have|try|own|order|know|start|keep|a|an|some|one|this|that)\b|\bdead\s?lines?\b|\bdie[\s-]cast\w*/g;
+/** English death words. (?<![\w-]) / (?![\w-]) so "die-cast" etc. never match. */
+const LOSS_DEATH =
+  /(?<![\w-])(die|dies|died+|dieing|dying|dyin|dead+|ded|death|deaths|deceased|mortality|casualt\w*|survival|survive[sd]?|surviving|survivability|killed|kills?|perish\w*|belly[\s-]up)(?![\w-])|\bpassed\s+away\b|\brip\b(?!\s*off)|\bdid\s*n'?o?t\s+(make\s+it|survive)|\bdidn'?t\s+(make\s+it|survive)|\bdidnt\s+(make\s+it|survive)|\bno\s+longer\s+alive\b|\bnot\s+alive\b/;
+const LOSS_FLOATING =
+  /\bfloat(ing|s|ed)?\b(?!\s+(plants?|food|pellets?|logs?|decor|ring))/;
+const LOSS_FLOAT_CTX = /\b(one|fish|discus|him|her|it|its|it's|they|them|top|surface|upside|belly|not\s+moving|motionless|found|meen)\b/;
+const LOSS_LOST =
+  /\blost\s+(a|one|two|three|four|\d+|my|both|all|some|many|any|the|few|several|another|of)?\s*(fish|discus|ones?|pairs?|meen|of\s+(them|my|the))\b|\b(have|did|do)\s+(you|u)\s+(ever\s+)?(lost?|lose)\b|\b(lose|loses|losing)\b[^.?!]*\b(fish|discus|many|any|some|meen|them)\b|\bloss(es)?\b(?!\s+of\s+(appetite|colou?r|weight))/;
+const LOSS_LOSS_EXCLUDE = /\b(appetite|colou?r|weight|hair)\s+loss\b/;
+const LOSS_REFUND =
+  /\brefund\w*|\bmoney\s+back\b|\breturn\s+(my\s+|the\s+|our\s+)?(money|amount|payment)\b|\bcompensat\w*|\breimburs\w*|\bcharge\s?-?backs?\b/;
+const LOSS_REPLACE =
+  /\breplac\w*\b[^.?!]*\b(dead|died|lost|it|them|that\s+one|the\s+one)\b|\b(free\s+)?replacement\s+(fish|discus|for)\b|\bfree\s+replacement\b/;
+/** Tanglish stems. Bare "sethu" is also a given name, so it needs fish context. */
+const LOSS_TANGLISH_INCIDENT =
+  /\bs+e+t+h+u(ruchu|ruch\w*|duchu|dutt?u\w*|pochu|poch\w*|chu|chi\w*|tt?u|ttaa|thu\w*|ra\w*|du\w*|po\w*|irundh\w*|irunth\w*|kidand\w*)\b|\bset+h+u\s+(pochu|poyiduchu|poiduchu|irundh\w*|irunth\w*|kidand\w*|ruchu|duchu)\b|\bsetthu\b|\bseththu\w*|\buyir\s*(poi|poy)\w*|\b(panam|kaasu|kasu|paisa)\s*(thirumba|thiruppi|return|back|wapas|vapas)\w*|\brefund\s+pann\w*/;
+const LOSS_SETHU_BARE = /\bsethu\b/;
+const LOSS_TANGLISH_QUESTION = /\bsaav\w*|\bsaag\w*|\bsaak\w*|\buyir\w*/;
+const LOSS_POIDUCHU = /\b(poiduchu|poyiduchu|pochu|poyidichu)\b/;
+const FISH_CTX = /\b(fish|fishes|discus|meen|meenu|ones?|pair|uyir|ellam|rendu|onnu|moonu|box|bag|parcel|cover)\b/;
+/** Tamil script (JS \b is ASCII-only, so plain substring families). */
+const LOSS_TAMIL_INCIDENT = /செத்து|செத்த|இறந்து|இறந்த|இறந்துவிட்ட|பணம்\s*திரும்ப|காசு\s*திரும்ப/;
+const LOSS_TAMIL_ANY = /செத்|இறந்|உயிர்|சாவு|சாக|பணம்\s*திரும்ப|காசு\s*திரும்ப/;
+
+/** True for any message about fish death, loss or a refund (English, Tanglish, Tamil). */
+export function isLossMessage(text: string): boolean {
+  const t = norm(text).replace(LOSS_IDIOMS, " ");
+  if (LOSS_DEATH.test(t) || LOSS_REFUND.test(t) || LOSS_REPLACE.test(t) || LOSS_TAMIL_ANY.test(t)) return true;
+  if (LOSS_LOST.test(t) && !LOSS_LOSS_EXCLUDE.test(t) && !/\blost\s+(my\s+|the\s+)?(order|parcel|package|tracking|way|password|money|link|connection|number|receipt)\b/.test(t)) return true;
+  if (LOSS_FLOATING.test(t) && LOSS_FLOAT_CTX.test(t)) return true;
+  if (LOSS_TANGLISH_INCIDENT.test(t) || LOSS_TANGLISH_QUESTION.test(t)) return true;
+  if (LOSS_SETHU_BARE.test(t) && FISH_CTX.test(t)) return true;
+  if (LOSS_POIDUCHU.test(t) && FISH_CTX.test(t)) return true;
+  return false;
+}
+
+/** General / rate questions about The Discus Den (MORTALITY ASKED, not an incident). */
+const LOSS_QUESTION_CTX =
+  /\b(how\s+many|how\s+often|do\s+(your|you|u|discus|fish|they)|does|will|would|can\s+they|any\s+(deaths?|losses|casualt\w*)|any\s+(fish|discus)\s+die|did\s+any|rate|rates|usually|often|normally|typically|easily|policy|do\s+you\s+give|is\s+there|what\s+happens|what\s+if|in\s+case|if\s+(a|the|any|it|they)\b|percentage|percent|survival|mortality|lately|in\s+your\s+tanks?|guarantee|aagum|aaguma|varuma|saagudh\w*|saaguma|with\s+you|have\s+(many|any|lots)|were\s+any|any\s+(fish|discus|of\s+them)|your|ur|yours|keep\s+dying|i\s+heard|heard\s+that|rumou?rs?|true|policy|lots\s+of|is\s+it\s+true|are\s+(your|the|discus)|ever|evlo|evvalavu|evalo|ethana|ethanai|indha\s+maasam|last\s+(week|month|year|batch)|this\s+(month|year|week))\b|எத்தனை|எவ்வளவு/;
+/** Strong personal markers: these outweigh question wording ("my fish died, do you refund?"). */
+const LOSS_PERSONAL =
+  /\b(my|mine|our|i\s+got|i\s+bought|i\s+received|from\s+you|arrived|came\s+dead|reached\s+dead|in\s+the\s+(bag|box|parcel|packet|cover)|box\s+la|opened|unbox\w*|video|promised|said|process|apply|approved|venum|kudunga|pannunga|me|i\s+(lost|had)|last\s+night|this\s+morning|just\s+now)\b|^lost\s+(a|one|my|two|\d+)\b/;
+/** Personal incident wording ("my fish died", "arrived dead", "sethu irundhuchu", "money back"). */
+const LOSS_INCIDENT_CTX =
+  /\b(my|mine|our|i\s+got|i\s+bought|i\s+received|from\s+you|arrived|came\s+dead|reached\s+dead|in\s+the\s+(bag|box|parcel|packet|cover)|box\s+la|opened|unbox\w*|found|this\s+morning|last\s+night|today|yesterday|just\s+now|video|promised|said|process|apply|approved|venum|kudunga|pannunga|me|pls|please|help|what\s+(do|now|should))\b/;
+
+/** Judge only the clause(s) that carry the loss words ("fish died, also is there a code..."). */
+function isLossIncident(text: string): boolean {
+  const clauses = norm(text).split(/[,.;!?]+|\balso\b|\bbtw\b/).map((c) => c.trim()).filter(Boolean);
+  const lossy = clauses.filter((c) => isLossMessage(c));
+  return (lossy.length ? lossy : [norm(text)]).some(isLossIncidentClause);
+}
+
+function isLossIncidentClause(text: string): boolean {
+  const t = norm(text).replace(LOSS_IDIOMS, " ");
+  if (LOSS_QUESTION_CTX.test(t) && !LOSS_PERSONAL.test(t)) return false;
+  if (LOSS_TAMIL_INCIDENT.test(t) || LOSS_TANGLISH_INCIDENT.test(t)) return true;
+  if ((LOSS_SETHU_BARE.test(t) || LOSS_POIDUCHU.test(t)) && FISH_CTX.test(t)) return true;
+  const pastOrNow =
+    /(?<![\w-])(died+|dead+|ded|dying|dyin|dieing|deceased|killed|casualty)(?![\w-])|\bpassed\s+away\b|\brip\b|\bdid\s*n'?o?t\s+(make\s+it|survive)|\bdidn'?t\s+(make\s+it|survive)|\bdidnt\s+(make\s+it|survive)|\bbelly[\s-]up\b|\bfloat\w*|\blost\s+(a|one|two|\d+|my|both|the|another)\b|\bnot\s+alive\b/;
+  const claim = LOSS_REFUND.test(t) || LOSS_REPLACE.test(t);
+  if (LOSS_QUESTION_CTX.test(t) && !LOSS_PERSONAL.test(t)) return false;
+  if (pastOrNow.test(t)) return true;
+  return claim && LOSS_INCIDENT_CTX.test(t);
+}
+
+function lossSafetyNet(state: ChatState, raw: string): Turn {
+  addFlag(state, isLossIncident(raw) ? "DOA CLAIM" : "MORTALITY ASKED");
+  if (state.completed) {
+    state.pendingOffer = null;
+    return { reply: join(stripOffer(ANSWERS.lossSafetyNet), ANSWERS.handoffAlreadyDone), intent: "loss_safety_net" };
+  }
+  // FAQ 26: the reply ends with "Shall I pass your details to him?" and the
+  // handoff starts right away; "yes" -> name question, "no" -> cancel.
+  state.handoff.active = true;
+  state.handoff.phoneTries = 0;
+  state.handoff.declined = [];
+  state.handoff.awaitingConsent = true;
+  state.pendingOffer = null;
+  prefillFromMessage(state, raw, norm(raw));
+  state.handoff.step = nextStep(state) ?? "name";
+  return { reply: ANSWERS.lossSafetyNet, intent: "loss_safety_net" };
+}
+
 const DEATH_REPORT = /\b(died|dead|doa|passed\s+away|not\s+alive|didn'?t\s+survive|did\s+not\s+survive|no\s+longer\s+alive)\b/;
 const ARRIVAL_CONTEXT =
   /\b(arriv\w*|in\s+the\s+(bag|box|packet|pack|parcel|cover|carton)|on\s+arrival|doa|when\s+(it|they|i)\s+(came|reached|got|opened|received)|after\s+(delivery|unboxing|opening)|unbox\w*|received|delivered|reached|my\s+(fish|discus|order|parcel|pair|ones?)|our\s+(fish|order)|i\s+(have|took|recorded|shot)\s+(the\s+|a\s+)?video|video)\b/;
@@ -843,6 +952,12 @@ const hasColour = (t: string) => COLOURS.some((c) => new RegExp(`\\b${c}\\b`).te
 
 export const INTENT_RULES: readonly IntentRule[] = [
   // ---- 1. safety ----
+  {
+    // FAQ 26 runs before every other answer, prompt attacks included (the reply is canned and safe).
+    id: "loss_safety_net", tier: "safety", faq: "FAQ 26",
+    test: (m) => isLossMessage(m.raw),
+    run: ({ state, raw }) => lossSafetyNet(state, raw),
+  },
   {
     id: "prompt_attack", tier: "safety", faq: "Rules: prompt attacks",
     test: (m) => RE.promptAttack.test(m.t),
@@ -1148,6 +1263,16 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
   // answered, even if they also parse as a field ("...last week" at the timeline step).
   const safety = safetyIntent(raw);
   const interrupt = safety !== null && !(step === "phone" && safety === "payment_details");
+  if (state.handoff.awaitingConsent) {
+    state.handoff.awaitingConsent = false;
+    const short = t.split(" ").length <= 5;
+    if (!interrupt && short && RE.negate.test(t)) {
+      state.handoff.active = false;
+      state.handoff.step = undefined;
+      return { reply: ANSWERS.handoffDeclined, intent: "handoff_cancelled" };
+    }
+    if (!interrupt && short && RE.affirm.test(t)) return { reply: askFor(step, state), intent: "handoff" };
+  }
   const answered = !interrupt && looksLikeAnswer(step, raw, t);
 
   // A question instead of an answer: answer it, then re-ask the same field.
@@ -1166,7 +1291,7 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
         const side = r.reply.replace(ANSWERS.handoffAlreadyDone, "").trim();
         return { reply: join(side, askFor(step, state)), intent: "handoff" };
       }
-      return { reply: join(stripOffer(r.reply), askFor(step, state)), intent: `${r.intent}+handoff` };
+      return { reply: join(stripOffer(r.reply.replace(ANSWERS.handoffAlreadyDone, "").trim()), askFor(step, state)), intent: `${r.intent}+handoff` };
     }
     if (r.intent === "prompt_attack") {
       return { reply: join(r.reply, askFor(step, state)), intent: "prompt_attack+handoff" };

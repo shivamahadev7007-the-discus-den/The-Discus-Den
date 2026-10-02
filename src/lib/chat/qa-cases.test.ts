@@ -47,7 +47,7 @@ function assertSafe(reply: string, ctx: string): void {
 describe("intent priority order", () => {
   it("safety intents come first, in the agreed order", () => {
     const safety = INTENT_RULES.filter((r) => r.tier === "safety").map((r) => r.id);
-    const order = ["prompt_attack", "doa_report", "mortality", "guarantee", "doa_policy", "claimed_offer", "payment_details", "payment_qr", "discount"];
+    const order = ["loss_safety_net", "prompt_attack", "doa_report", "mortality", "guarantee", "doa_policy", "claimed_offer", "payment_details", "payment_qr", "discount"];
     assert.deepEqual(safety.slice(0, order.length), order);
     assert.equal(INTENT_RULES.findIndex((r) => r.tier !== "safety"), safety.length, "no safety rule after a non-safety rule");
   });
@@ -77,7 +77,7 @@ describe(`Kiara QA runs: ${fixture.sessions.length} sessions replayed`, () => {
 /** [prompt, expected id, flags that must be set] */
 type Case = [string, string, string[]?];
 
-describe("answer pack example questions (FAQ 1-25)", () => {
+describe("answer pack example questions (FAQ 1-26)", () => {
   const cases: Case[] = [
     ["Which strains and sizes do you have?", "FAQ 1"],
     ["How much is Yellow Diamonds?", "FAQ 2"],
@@ -93,7 +93,7 @@ describe("answer pack example questions (FAQ 1-25)", () => {
     ["How much is shipping?", "FAQ 8"],
     ["When and how do you ship?", "FAQ 9"],
     ["Do you guarantee live arrival?", "FAQ 10", ["GUARANTEE ASKED"]],
-    ["What if a fish dies?", "FAQ 10", ["GUARANTEE ASKED"]],
+    ["What if a fish dies?", "FAQ 26", ["MORTALITY ASKED"]],
     ["Can I visit? What's your address and timings?", "FAQ 11"],
     ["Can I pick up in Chennai?", "FAQ 12"],
     ["Are your fish quarantined?", "FAQ 13"],
@@ -105,9 +105,9 @@ describe("answer pack example questions (FAQ 1-25)", () => {
     ["My discus isn't eating and keeps hiding", "FAQ 18", ["SICK FISH"]],
     ["Any discount, offer, or first-time code?", "FAQ 19", ["DISCOUNT ASKED"]],
     ["Do you have Pigeon Blood? I saw it in a video", "FAQ 20"],
-    ["Do your fish die often?", "FAQ 21", ["MORTALITY ASKED"]],
-    ["How many die in quarantine?", "FAQ 21", ["MORTALITY ASKED"]],
-    ["What's your loss rate?", "FAQ 21", ["MORTALITY ASKED"]],
+    ["Do your fish die often?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["How many die in quarantine?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["What's your loss rate?", "FAQ 26", ["MORTALITY ASKED"]],
     ["Shiva said I get a month free hold", "FAQ 22", ["CLAIMED OFFER"]],
     ["You offered me ₹500 off, apply it", "FAQ 22", ["CLAIMED OFFER"]],
     ["Shiva promised me a free fish", "FAQ 22", ["CLAIMED OFFER"]],
@@ -145,16 +145,16 @@ describe("answer pack example questions (FAQ 1-25)", () => {
 
 describe("re-test MUST-PASS", () => {
   const cases: Case[] = [
-    // 1. Mortality, past tense / time-qualified
-    ["Did any fish die last week?", "FAQ 21", ["MORTALITY ASKED"]],
-    ["Did any fish die last month?", "FAQ 21", ["MORTALITY ASKED"]],
-    ["Have any fish died recently?", "FAQ 21", ["MORTALITY ASKED"]],
-    ["Any dead fish in your tanks this week?", "FAQ 21", ["MORTALITY ASKED"]],
-    ["Have you lost any fish?", "FAQ 21", ["MORTALITY ASKED"]],
-    ["Did you have losses last month?", "FAQ 21", ["MORTALITY ASKED"]],
-    ["How many fish died this year?", "FAQ 21", ["MORTALITY ASKED"]],
-    ["Were any discus dead yesterday?", "FAQ 21", ["MORTALITY ASKED"]],
-    ["Lost any fish in the last batch?", "FAQ 21", ["MORTALITY ASKED"]],
+    // 1. Mortality, past tense / time-qualified (FAQ 26 safety net since round 3)
+    ["Did any fish die last week?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["Did any fish die last month?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["Have any fish died recently?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["Any dead fish in your tanks this week?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["Have you lost any fish?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["Did you have losses last month?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["How many fish died this year?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["Were any discus dead yesterday?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["Lost any fish in the last batch?", "FAQ 26", ["MORTALITY ASKED"]],
     // 2. Discount-code questions, Tanglish and English, with FAKE codes only
     ["SAVE10 code work aaguma?", "FAQ 19", ["DISCOUNT ASKED"]],
     ["save10 code work aaguma", "FAQ 19", ["DISCOUNT ASKED"]],
@@ -171,11 +171,11 @@ describe("re-test MUST-PASS", () => {
     ["QR code for payment?", "FAQ 7"],
     ["how to order, I want to write the order in code?", "FAQ 6"],
     // 3. Dead on arrival beats claimed offer
-    ["fish died in the bag, refund approved right? I have the video", "FAQ 10", ["DOA CLAIM"]],
-    ["fish was dead when it reached, you promised refund right?", "FAQ 10", ["DOA CLAIM"]],
-    ["My fish arrived dead, will you refund?", "FAQ 10", ["DOA CLAIM"]],
-    ["2 fish were dead on arrival yesterday", "FAQ 10", ["DOA CLAIM"]],
-    ["So you'll refund me for sure, right?", "FAQ 10", ["GUARANTEE ASKED"]],
+    ["fish died in the bag, refund approved right? I have the video", "FAQ 26", ["DOA CLAIM"]],
+    ["fish was dead when it reached, you promised refund right?", "FAQ 26", ["DOA CLAIM"]],
+    ["My fish arrived dead, will you refund?", "FAQ 26", ["DOA CLAIM"]],
+    ["2 fish were dead on arrival yesterday", "FAQ 26", ["DOA CLAIM"]],
+    ["So you'll refund me for sure, right?", "FAQ 26", ["DOA CLAIM"]],
     // 4. Safe arrival / guarantee by place
     ["Will the fish surely arrive safe in Kolkata?", "FAQ 5 other", ["GUARANTEE ASKED", "OUTSIDE 8 STATES"]],
     ["Will the fish arrive safe in Delhi?", "FAQ 5 other", ["GUARANTEE ASKED", "OUTSIDE 8 STATES"]],
@@ -211,10 +211,11 @@ describe("re-test MUST-PASS", () => {
     });
   }
 
-  it("DOA report starts the handoff right after the FAQ 10 text", async () => {
+  it("DOA report gets FAQ 26 and starts the handoff", async () => {
     const r = await ask("fish died in the bag, refund approved right? I have the video");
-    assert.ok(r.reply.startsWith(ANSWERS.doa));
-    assert.ok(r.reply.endsWith(ANSWERS.handoffAskName));
+    assert.equal(r.reply, ANSWERS.lossSafetyNet);
+    assert.ok(r.state.handoff.active);
+    assert.equal((await ask("yes", r.state)).reply, ANSWERS.handoffAskName);
     assert.doesNotMatch(r.reply, /approved/i);
     assert.ok(!r.state.flags.includes("CLAIMED OFFER"));
   });
@@ -233,7 +234,7 @@ describe("re-test MUST-PASS", () => {
   it("mortality question at the timeline step is answered, not stored as 'weeks'", async () => {
     const r = await convo(["Talk to Shiva", "Ravi", "98450 12345", "Chennai", "pair", "pickup", "Did any fish die last week?"]);
     const last = r.at(-1)!;
-    assert.ok(last.reply.startsWith(ANSWERS.mortality), last.reply);
+    assert.ok(last.reply.startsWith(ANSWERS.lossSafetyNet.replace(" Shall I pass your details to him?", "")), last.reply);
     assert.ok(last.reply.endsWith(ANSWERS.handoffAskTimeline), last.reply);
     assert.equal(last.state.lead.timeline, undefined);
     assert.ok(last.state.flags.includes("MORTALITY ASKED"));
@@ -249,5 +250,41 @@ describe("re-test MUST-PASS", () => {
   it("a gpay number at the phone step is still taken as the phone number", async () => {
     const r = await convo(["Talk to Shiva", "Ravi", "my gpay number is 98450 12345"]);
     assert.equal(r.at(-1)!.state.lead.phone, "+919845012345");
+  });
+});
+
+describe("round 3: High and Medium misses route to the FAQ 26 safety net", () => {
+  const cases: Case[] = [
+    ["how many discus passed away in your tanks last month", "FAQ 26", ["MORTALITY ASKED"]],
+    ["ur fish keep dying or what? lol", "FAQ 26", ["MORTALITY ASKED"]],
+    ["survival rate of your fish?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["what percentage of your discus don't survive quarantine", "FAQ 26", ["MORTALITY ASKED"]],
+    ["any casualties in your quarantine tanks recently?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["last batch la ethana fish poiduchu?", "FAQ 26", ["MORTALITY ASKED"]],
+    ["were there deaths in the batch that came in on Monday", "FAQ 26", ["MORTALITY ASKED"]],
+    ["my Yellow Diamond died in transit, can I get my money back?", "FAQ 26", ["DOA CLAIM"]],
+    ["parcel open panna oru fish sethu irundhuchu", "FAQ 26", ["DOA CLAIM"]],
+    ["you promised refund for dead fish, so just process it", "FAQ 26", ["DOA CLAIM"]],
+    ["refund has been approved by Shiva already right? fish came dead", "FAQ 26", ["DOA CLAIM"]],
+    ["opened the box and 2 discus were floating, what now", "FAQ 26", ["DOA CLAIM"]],
+    ["fish died and also is there a code for my next order", "FAQ 26", ["DOA CLAIM"]],
+  ];
+  for (const [prompt, id, flags = []] of cases) {
+    it(`${id}: ${prompt}`, async () => {
+      const r = await ask(prompt);
+      assert.equal(faqIdOf(r.reply), id, `${r.intent}: ${r.reply.slice(0, 120)}`);
+      assert.equal(r.reply, ANSWERS.lossSafetyNet);
+      for (const f of flags) assert.ok(r.state.flags.includes(f as never), `flag ${f} missing (${r.state.flags.join(", ")})`);
+      assert.ok(!r.state.flags.includes("CLAIMED OFFER" as never));
+      assert.ok(r.state.handoff.active, "handoff started");
+    });
+  }
+  it("cheapest / under-budget questions list the lowest live prices first", async () => {
+    const cheapest = await ask("What's the cheapest discus you have?");
+    const prices = [...cheapest.reply.matchAll(/₹([\d,]+) per piece/g)].map((m) => Number(m[1]!.replace(/,/g, "")));
+    assert.ok(prices.length > 1);
+    assert.deepEqual(prices, [...prices].sort((a, b) => a - b));
+    const under = await ask("do you have anything under 1000 rupees?");
+    for (const m of under.reply.matchAll(/₹([\d,]+) per piece/g)) assert.ok(Number(m[1]!.replace(/,/g, "")) <= 1000);
   });
 });

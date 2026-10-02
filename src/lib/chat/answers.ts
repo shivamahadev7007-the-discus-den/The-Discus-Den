@@ -145,6 +145,12 @@ export const ANSWERS = {
     "I can't share that here. Our available page shows what's ready now: thediscusden.com/available. Want me to narrow it down by size or colour?",
   /** FAQ 24: "If still unclear" clarifying question (never just "I'm not sure"). */
   unclear: "Sorry, I didn't catch that. Are you asking about our fish, prices, or delivery?",
+  /**
+   * FAQ 26 (pack rev. 20:19): safety net for any death, loss or refund message.
+   * Runs before every other answer and replaces FAQ 10 and 21 when triggered.
+   */
+  lossSafetyNet:
+    "Every fish is quarantined, fed and settled before it ships, and we don't share loss figures. If a fish arrived dead, please send Shiva a clear unboxing video within 24 hours of arrival. He reviews every claim personally, and I can't approve refunds here. Shall I pass your details to him?",
   /** Last-resort reply (pack wording, approved 2 Oct): the output guard's safe replacement. */
   unsure: "Shiva is the best person for that one. Shall I pass your question to him?",
   /** FAQ 25: delivery abroad. Hand off; flags OUTSIDE 8 STATES + REMOTE. Never promise international shipping. */
