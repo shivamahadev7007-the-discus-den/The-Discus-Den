@@ -49,7 +49,7 @@ const ENTRIES: Entry[] = [
   [["tripura", "agartala"], "Tripura", "remote"],
   [["sikkim", "gangtok"], "Sikkim", "remote"],
   // Abroad
-  [["dubai", "uae", "abu dhabi", "sharjah", "qatar", "doha", "saudi", "oman", "muscat", "kuwait", "bahrain", "usa", "america", "uk", "london", "canada", "australia", "singapore", "malaysia", "sri lanka", "colombo", "nepal", "bangladesh", "abroad", "overseas", "outside india"], "Outside India", "abroad"],
+  [["dubai", "uae", "abu dhabi", "sharjah", "qatar", "doha", "saudi", "oman", "muscat", "kuwait", "bahrain", "usa", "america", "uk", "london", "canada", "australia", "singapore", "malaysia", "sri lanka", "colombo", "nepal", "bangladesh", "abroad", "overseas", "outside india", "out of india", "united states", "united kingdom", "international", "internationally", "germany", "europe", "japan", "hong kong", "maldives", "thailand"], "Outside India", "abroad"],
 ];
 
 function escapeRe(s: string): string {

@@ -181,7 +181,7 @@ const RE = {
   shipHow:
     /\b((when|how)\s+(do|will|would|does)\s+(you|it|they|the\s+fish)\s+(ship|deliver|dispatch|arrive|send|come)|how\s+(is|are)\s+(it|they|fish)\s+(shipped|delivered|sent)|shipping\s+(process|method|time)|delivery\s+time|how\s+long\s+(does|will)\s+(shipping|delivery))\b/,
   ship:
-    /\b(ship|ships|shipping|deliver|delivery|courier|send\s+to|transport|parcel|anuppu\w*|anupp\w*|anupuv\w*|anuppa\w*|varuma)\b/,
+    /\b(ship|ships|shipping|deliver|delivery|courier|send\s+(?:\w+\s+){0,3}to|transport|parcel|anuppu\w*|anupp\w*|anupuv\w*|anuppa\w*|varuma)\b/,
   pickup: /\b(pick\s?-?up|pickup|collect\s+(in|from|at)|self\s+pick|pickup\s+irukka)\b/,
   visit:
     /\b(visit|address|location|where\s+are\s+you|where\s+is\s+(the\s+)?(den|shop|store)|timings?|opening\s+hours|hours|open\s+(today|now)|come\s+to\s+(your|the)\s+(shop|store|place|den)|your\s+(shop|store)|do\s+you\s+have\s+a\s+(shop|store))\b/,
@@ -714,7 +714,7 @@ function shippingAnswer(state: ChatState, t: string): Turn {
     if (place.zone === "other") return { reply: ANSWERS.shipOtherState, intent: "ship_other_state" };
     addFlag(state, "REMOTE");
     if (place.zone === "remote") return { reply: ANSWERS.shipRemote, intent: "ship_remote" };
-    return { reply: ANSWERS.unsure, intent: "ship_abroad" };
+    return { reply: ANSWERS.shipAbroad, intent: "ship_abroad" };
   }
   state.pendingOffer = null;
   return { reply: ANSWERS.shipInStates, intent: "ship_general" };

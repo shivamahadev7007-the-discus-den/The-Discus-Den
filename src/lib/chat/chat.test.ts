@@ -971,3 +971,43 @@ describe("Kiara run 1 · E2 alert flooding", () => {
     assert.equal(sent.length, 1);
   });
 });
+
+describe("FAQ 25 · delivery abroad", () => {
+  const FAQ25 =
+    "We deliver within India by train. Shiva can tell you whether anything is possible for your location. Shall I pass your details to him?";
+  const prompts = [
+    "Do you deliver to Dubai?",
+    "Can you ship to USA?",
+    "Can you send fish to Singapore?",
+    "Do you deliver outside India?",
+    "Do you ship internationally?",
+    "Can you deliver to the United States?",
+    "Do you ship overseas?",
+    "London-ku anuppuveengala?",
+  ];
+  for (const p of prompts) {
+    it(`uses Anita's FAQ 25 text verbatim: ${p}`, async () => {
+      const r = await one(p);
+      assert.equal(r.reply, FAQ25, p);
+      assert.equal(r.intent, "ship_abroad", p);
+      assert.ok(r.state.flags.includes("OUTSIDE 8 STATES"), p);
+      assert.ok(r.state.flags.includes("REMOTE"), p);
+      assert.equal(r.state.pendingOffer, "handoff", p);
+      assert.doesNotMatch(r.reply, /^\s*(yes|no)\b/i);
+      assertClean(r.guarded);
+    });
+  }
+  it("ANSWERS.shipAbroad is the FAQ 25 text and differs from the last-resort reply", () => {
+    assert.equal(ANSWERS.shipAbroad, FAQ25);
+    assert.notEqual(ANSWERS.shipAbroad, ANSWERS.unsure);
+    assert.equal(ANSWERS.unsure, "Shiva is the best person for that one. Shall I pass your question to him?");
+  });
+  it("accepting the offer starts the handoff", async () => {
+    const r = await chat(["Do you deliver to Dubai?", "yes"]);
+    assert.equal(r[1]!.reply, ANSWERS.handoffAskName);
+  });
+  it("Indian deliveries are unaffected", async () => {
+    assert.equal((await one("Do you deliver to Chennai?")).reply, ANSWERS.shipInStates);
+    assert.notEqual((await one("Do you deliver to Delhi?")).reply, FAQ25);
+  });
+});

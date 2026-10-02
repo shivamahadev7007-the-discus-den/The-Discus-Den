@@ -145,12 +145,11 @@ export const ANSWERS = {
     "I can't share that here. Our available page shows what's ready now: thediscusden.com/available. Want me to narrow it down by size or colour?",
   /** FAQ 24: "If still unclear" clarifying question (never just "I'm not sure"). */
   unclear: "Sorry, I didn't catch that. Are you asking about our fish, prices, or delivery?",
-  /**
-   * Handoff offer for questions the pack doesn't cover (e.g. delivery abroad) and
-   * the output guard's safe replacement. Not verbatim in the pack ("Uncertainty:
-   * offer the handoff"); phrased after FAQ 3.
-   */
+  /** Last-resort reply (pack wording, approved 2 Oct): the output guard's safe replacement. */
   unsure: "Shiva is the best person for that one. Shall I pass your question to him?",
+  /** FAQ 25: delivery abroad. Hand off; flags OUTSIDE 8 STATES + REMOTE. Never promise international shipping. */
+  shipAbroad:
+    "We deliver within India by train. Shiva can tell you whether anything is possible for your location. Shall I pass your details to him?",
   thanks: "You're welcome. Anything else I can help with?",
   bye: "Thank you for visiting The Discus Den. Take care.",
 
