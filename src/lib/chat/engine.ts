@@ -124,9 +124,30 @@ function stripOffer(text: string): string {
 
 const RE = {
   promptAttack:
-    /\b(ignore\s+(all\s+|any\s+|your\s+|the\s+|previous\s+|prior\s+|above\s+|these\s+)*(rules|instructions|prompts?|guidelines|restrictions)|disregard\s+(your|all|the|previous)|forget\s+(your|all|previous|the)\s+(rules|instructions)|pretend\s+(to\s+be|you|you're|that)|role\s?-?play|act\s+as|you\s+are\s+now|from\s+now\s+on\s+you|system\s+prompt|developer\s+mode|jailbreak|dan\s+mode|reveal\s+(your\s+)?(prompt|instructions|rules)|what\s+are\s+your\s+(rules|instructions)|show\s+(me\s+)?your\s+(prompt|instructions|rules)|override|admin\s+mode|sudo|new\s+instructions)\b/,
+    /\b(ignore\s+(all\s+|any\s+|your\s+|the\s+|previous\s+|prior\s+|above\s+|these\s+)*(rules|instructions|prompts?|guidelines|restrictions)|disregard\s+(your|all|the|previous)|forget\s+(your|all|previous|the)\s+(rules|instructions)|pretend\s+(to\s+be|you|you're|that)|role\s?-?play|act\s+as|you\s+are\s+now|from\s+now\s+on\s+you|system\s+prompt|developer\s+mode|jailbreak|dan\s+mode|reveal\s+(your\s+)?(prompt|instructions|rules)|what\s+are\s+your\s+(rules|instructions)|show\s+(me\s+)?your\s+(prompt|instructions|rules)|override|admin\s+mode|sudo|new\s+instructions|new\s+rule|repeat\s+after\s+me|repeat\s+everything|as\s+an?\s+admin|i\s+authori[sz]e\s+you|internal\s+(quantity|data|figures)|translate\s+your\s+(instructions|rules|prompt)|rules\s+ellam|marandhu\w*)\b|<\/?system>|^(system|say)\s*:/,
   discount:
-    /\b(discount|discounts|coupon|coupons|promo|promocode|voucher|offer|offers|code|codes|first[\s-]?time\s+(code|offer|discount)|any\s+deal|deals|cashback|referral)\b/,
+    /\b(discount|discounts|coupon|coupons|promo|promocode|voucher|vouchers|offer|offers|cashback|referral|any\s+deal|deals|first[\s-]?time\s+(code|offer|discount)|(discount|coupon|promo|promotional|offer|referral|voucher|first[\s-]?time|friend'?s?|secret|special|cart)\s+codes?|(the|a|any|your|that|this)\s+code|code\s+(is|for)|\d+\s*%\s*off|\d+\s*(rupees|rs)\s+off)\b|(₹|\brs\.?\s*)\s*\d[\d,]*\s*off\b/,
+  /** FAQ 22: a claimed promise/offer ("Shiva said...", "you offered...", "apply it"). */
+  claimVerb:
+    /\b(shiva|you|he|your\s+(team|staff|bot|site|website|guy)|the\s+bot|someone|they)\s+(said|says|told|tells|promised|offered|agreed|gave|confirmed|mentioned|guaranteed|assured)\b|\b(was|were|been|got|am|i'?m)\s+(promised|offered|told|assured)\b|\bas\s+(promised|agreed|discussed)\b|\bpromised\b/,
+  claimApply: /\bapply\s+(it|that|this|the|my)\b/,
+  claimFreeMonth: /\b(free\s+for\s+a\s+month|a\s+month\s+free|month\s+free|free\s+month)\b/,
+  offerish:
+    /\b(off|free|discount|discounts|offer|offers|price|cheaper|refund|hold|holding|month|apply|deal|waive|waived|extra|less|code|coupon|bonus|gift)\b|%|₹|\brs\.?\s*\d/,
+  refundSure: /\brefund\b[^?.]*\b(for\s+sure|right|guarantee\w*|definitely|confirm\w*|promise\w*)\b/,
+  /** FAQ 21: mortality / loss questions. */
+  mortalityWord:
+    /\b(die|dies|died|dying|death|deaths|dead|lose|loses|losing|lost|loss|losses|mortality)\b|\b(setth|sethth|sethu|saag|seththu)\w*/,
+  mortalityTamil: /\b(setth|sethth|sethu|saag|seththu)\w*/,
+  mortalityContext:
+    /\b(your|you|often|many|much|lots|lot|rate|rates|ever|usually|quarantine|transit|tanks?|how\s+many|true|percent|percentage|frequently|regularly|common|evlo|ethana)\b|%/,
+  mortalityPersonal:
+    /\b(my|mine|our)\s+(fish|discus|order|ones?)\b|\barriv\w*|\bon\s+arrival\b|\bwhat\s+(happens\s+)?if\b|\bif\s+(a|the|my|any)\b|\bin\s+case\b|\bsuppose\b|\brefund\b|\bdoa\b/,
+  sickOften: /\b(sick|ill|diseased?)\b[^?.]*\b(often|usually|frequently|common|lot)\b|\byour\s+fish\b[^?.]*\b(sick|ill|diseased?)\b/,
+  /** FAQ 23: off-topic requests. */
+  offTopic:
+    /\b(python|javascript|typescript|java|html|css|sql|programming|coding|code\s+(for|in|to)|write\s+(me\s+)?(a\s+|an\s+|some\s+)?(code|program|script|essay|poem|story|letter|song|email|article)|homework|assignment|exam|essay|weather|forecast|raining|rain\s+today|news|headlines?|election|politics|cricket|ipl|football|movie|movies|film|recipe|joke|jokes|capital\s+of|president|prime\s+minister|bitcoin|crypto|stock\s+market|share\s+price|girlfriend|boyfriend|relationship|horoscope|astrology|translate|math|maths)\b/,
+  fishCore: /\b(discus|fish|fishes|aquarium|tank|strains?|pellets?|bloodworms?|order|delivery|shipping|pickup)\b/,
   paymentConfirm:
     /\b(paid|have\s+paid|payment\s+(done|sent|made|completed)|sent\s+(the\s+)?(money|payment|amount)|transferred|did\s+you\s+(get|receive)|received\s+(my|the)\s+(payment|money)|is\s+this\s+(the\s+)?(right|correct|your)|confirm\s+(the\s+|my\s+)?(number|upi|payment|account)|gpay\s+number|upi\s+number|payment\s+number|upi\s+id|account\s+(number|details)|bank\s+details|ifsc)\b/,
   payment:
@@ -138,11 +159,11 @@ const RE = {
   sick:
     /\b(sick|ill|unwell|disease|diseased|spots?|white\s+spot|not\s+eating|isn'?t\s+eating|stopped\s+eating|won'?t\s+eat|hiding|fungus|ich|bloat(ed)?|dropsy|parasites?|medicine|medication|treatment|treat|cure|salt|dying|gasping|clamped|udambu|sari\s+illa|saapdala|saapidala|saapidavillai|noi)\b/,
   internal:
-    /\b(how\s+many\b[^?.]*\b(left|remaining|available|in\s+stock|do\s+you\s+have|have\s+you\s+got|pieces|units)|any\s+left|left\s+in\s+stock|stock\s+left|how\s+many\s+(fish|discus)\s+(do\s+you\s+have|are\s+there|left)|stock\s+(count|level|quantity)|quantity\s+(left|available)|mortality|death\s+rate|how\s+many\s+died|losses|supplier|suppliers|breeder|breeders|where\s+do\s+you\s+(get|source|import|buy)|source\s+farm|which\s+farm|imported?\s+from|who\s+supplies)\b/,
+    /\b(how\s+many\b[^?.]*\b(left|remaining|available|in\s+stock|do\s+you\s+have|have\s+you\s+got|pieces|units)|any\s+left|left\s+in\s+stock|stock\s+left|how\s+many\s+(fish|discus)\s+(do\s+you\s+have|are\s+there|left)|stock\s+(count|level|quantity)|quantity\s+(left|available)|mortality|death\s+rate|how\s+many\s+died|losses|supplier|suppliers|breeder|breeders|where\s+do\s+you\s+(get|source|import|buy)|source\s+farm|which\s+farm|imported?\s+from|who\s+supplies|who\s+breeds|bred\s+by|yaar\s+kitta|vaangu\w*|selling\s+fast|sold\s+out|almost\s+gone|last\s+one|only\s+(one|1|\d+)\b[^?.]*\bleft|stock\s+(is\s+)?limited|limited\s+stock|plenty|enough\s+(for|of)|that\s+many|short\s+supply|running\s+out|(evlo|evvalavu|evlavu|evalo|ethana|ethanai)\b[^?.]*\b(irukk\w*|stock|left|pieces?)|(stock|pieces?)\s+(evlo|evvalavu|ethana)\w*)\b/,
   human:
     /\b(are\s+you\s+(a\s+)?(human|person|real|bot|robot|ai|machine)|is\s+this\s+(a\s+)?(bot|human|real\s+person|ai)|am\s+i\s+(talking|chatting)\s+(to|with)|you\s+a\s+bot)\b/,
   talkToShiva:
-    /\b(talk\s+to\s+shiva|speak\s+(to|with)\s+shiva|chat\s+with\s+shiva|talk\s+to\s+(a\s+)?(human|person|someone|owner)|real\s+person|contact\s+shiva|call\s+shiva|reach\s+shiva|message\s+shiva|shiva'?s?\s+(number|phone|whatsapp|contact|mobile|email)|your\s+(number|phone|whatsapp|contact|mobile|email)|phone\s+number|whatsapp\s+number|mobile\s+number|contact\s+(number|details|info)|call\s+me|call\s+back|shiva\s+kitta|pesanum|connect\s+me)\b/,
+    /\b(talk\s+to\s+shiva|speak\s+(to|with)\s+shiva|chat\s+with\s+shiva|talk\s+to\s+(a\s+)?(human|person|someone|owner)|real\s+person|contact\s+shiva|call\s+shiva|reach\s+shiva|message\s+shiva|shiva'?s?\s+(number|phone|whatsapp|contact|mobile|email)|your\s+(number|phone|whatsapp|contact|mobile|email)|phone\s+number|whatsapp\s+number|mobile\s+number|contact\s+(number|details|info)|call\s+me|call\s+back|shiva\s+kitta|pesanum|pesa\s+venum|connect\s+me|number\s+(kudunga|kudu|venum|send)|call\s+(pannanum|pannunga|panna|pannuga)|phone\s+line|business\s+(number|phone|line)|contact\s+number|your\s+contact)\b/,
   reseller:
     /\b(wholesale|wholesaler|resell|reseller|resale|dealer|distributor|trade\s+(price|enquiry|rate)|bulk\s+(order|price|rate|buy)|my\s+(shop|store)|i\s+(have|run|own)\s+(a|an)\s+(shop|store|aquarium\s+shop|pet\s+shop))\b/,
   holding:
@@ -160,7 +181,7 @@ const RE = {
   shipHow:
     /\b((when|how)\s+(do|will|would|does)\s+(you|it|they|the\s+fish)\s+(ship|deliver|dispatch|arrive|send|come)|how\s+(is|are)\s+(it|they|fish)\s+(shipped|delivered|sent)|shipping\s+(process|method|time)|delivery\s+time|how\s+long\s+(does|will)\s+(shipping|delivery))\b/,
   ship:
-    /\b(ship|ships|shipping|deliver|delivery|courier|send\s+to|transport|parcel|anuppu\w*|anupp\w*|anupuv\w*)\b/,
+    /\b(ship|ships|shipping|deliver|delivery|courier|send\s+to|transport|parcel|anuppu\w*|anupp\w*|anupuv\w*|anuppa\w*|varuma)\b/,
   pickup: /\b(pick\s?-?up|pickup|collect\s+(in|from|at)|self\s+pick|pickup\s+irukka)\b/,
   visit:
     /\b(visit|address|location|where\s+are\s+you|where\s+is\s+(the\s+)?(den|shop|store)|timings?|opening\s+hours|hours|open\s+(today|now)|come\s+to\s+(your|the)\s+(shop|store|place|den)|your\s+(shop|store)|do\s+you\s+have\s+a\s+(shop|store))\b/,
@@ -170,9 +191,9 @@ const RE = {
   care:
     /\b(care|tips|how\s+to\s+(keep|maintain|look\s+after|raise)|maintenance|water\s+change|water\s+changes|temperature|temp|ph|feeding|how\s+often|tank\s+size|tank\s+mates|setup|set\s+up)\b/,
   price:
-    /\b(price|prices|pricing|cost|costs|rate|rates|how\s+much|evlo|evvalavu|evlavu|evalo|vilai|rupees|rs|inr)\b|₹/,
+    /\b(price|prices|pricing|cost|costs|rate|rates|how\s+much|evlo|evvalavu|evlavu|evalo|evlo\s+aagum|vilai|price\s+enna|enna\s+(price|rate|vilai)|rupees|rs|inr)\b|₹/,
   available:
-    /\b(i\s+want|looking\s+for|want\s+to\s+buy|interested\s+in)\b[^?.]*\b(fish|discus|pair)\b|\b(available|availability|in\s+stock|what\s+(fish|discus|strains?)|which\s+(fish|discus|strains?)|strains?|sizes?|what\s+do\s+you\s+have|show\s+me|list|catalog|catalogue|irukka|stock)\b/,
+    /\b(i\s+want|looking\s+for|want\s+to\s+buy|interested\s+in)\b[^?.]*\b(fish|discus|pair)\b|\b(available|availability|in\s+stock|what\s+(fish|discus|strains?)|which\s+(fish|discus|strains?)|strains?|sizes?|what\s+do\s+you\s+have|show\s+me|list|catalog|catalogue|irukka|irukku|irukkaa|iruka|iruku|enna\s+(fish|discus|stock|meen)|endha\s+(fish|discus)|fish\s+list|stock)\b/,
   greeting:
     /^(hi+|hello+|hey+|hai|hiya|vanakkam|namaste|namaskaram|good\s+(morning|afternoon|evening)|yo|hola|start)\b[\s!.?,]*$/,
   thanks: /^(thanks|thank\s+you|thx|ty|nandri|ok\s+thanks|okay\s+thanks|great\s+thanks|cool)\b[\s!.?,a-z]*$/,
@@ -375,7 +396,7 @@ function digitCount(text: string): number {
 }
 
 const NAME_BLOCK =
-  /\b(price|fish|discus|shiva|ignore|rules|instructions|yes|no|ok|okay|skip|tank|ship|how|what|why|where|when|available|hello|hi|hey|thanks|code|discount|pay|refund|pair|single|train|pickup|chennai|bot|prompt|system|admin)\b/i;
+  /\b(list|all|leads?|show|give|repeat|details|number|admin|delete|tell|print|everyone|customers?|price|fish|discus|shiva|ignore|rules|instructions|yes|no|ok|okay|skip|tank|ship|how|what|why|where|when|available|hello|hi|hey|thanks|code|discount|pay|refund|pair|single|train|pickup|chennai|bot|prompt|system|admin)\b/i;
 
 export function parseName(raw: string): string | null {
   let s = raw.trim().replace(/[.!]+$/, "");
@@ -706,6 +727,35 @@ async function routeIntent(state: ChatState, raw: string, t: string, ctx: Ctx): 
     state.pendingOffer = null;
     return { reply: ANSWERS.promptAttack, intent: "prompt_attack" };
   }
+  // FAQ 23: off-topic (code, weather, news, homework...). Don't attempt it, don't fall back to an FAQ.
+  if (RE.offTopic.test(t) && !RE.fishCore.test(t) && !/\b(discount|coupon|promo|offers?|first[\s-]?time|voucher|referral|cart)\b/.test(t)) {
+    state.pendingOffer = null;
+    return { reply: ANSWERS.offTopic, intent: "off_topic" };
+  }
+  // FAQ 22: claimed promises/offers win over holding (FAQ 14) and discounts (FAQ 19).
+  const isQuestionAsk = /^(can|could|will|would|do|does|is|any|how)\b/.test(t);
+  if (
+    (RE.claimVerb.test(t) && RE.offerish.test(t)) ||
+    RE.claimApply.test(t) ||
+    (RE.claimFreeMonth.test(t) && !isQuestionAsk) ||
+    RE.refundSure.test(t)
+  ) {
+    addFlag(state, "CLAIMED OFFER");
+    if (/\b(hold|holding|month)\b/.test(t)) addFlag(state, "LONG HOLD");
+    if (RE.refundSure.test(t)) addFlag(state, "GUARANTEE ASKED");
+    if (/\b(off|free|discount|offer|cheaper|less|code|coupon|bonus|gift|waive\w*)\b|%|₹|\brs\.?\s*\d/.test(t)) addFlag(state, "DISCOUNT ASKED");
+    state.pendingOffer = "handoff";
+    return { reply: ANSWERS.claimedOffer, intent: "claimed_offer" };
+  }
+  // FAQ 21: mortality. Neutral, never yes/no, never numbers.
+  if (
+    (RE.mortalityWord.test(t) && (RE.mortalityTamil.test(t) || /\bmortality\b|\bloss(es)?\s+rate\b|\bdeath\s+rate\b/.test(t) || (RE.mortalityContext.test(t) && !RE.mortalityPersonal.test(t)))) ||
+    RE.sickOften.test(t)
+  ) {
+    addFlag(state, "MORTALITY ASKED");
+    state.pendingOffer = "handoff";
+    return { reply: ANSWERS.mortality, intent: "mortality" };
+  }
   if (RE.discount.test(t) || COUPON_TOKEN.test(raw)) {
     addFlag(state, "DISCOUNT ASKED");
     state.pendingOffer = "handoff";
@@ -842,8 +892,11 @@ async function routeIntent(state: ChatState, raw: string, t: string, ctx: Ctx): 
     return { reply: `Thanks, ${state.lead.name}. How can I help?`, intent: "name_given" };
   }
 
-  // A bare place ("I'm in Delhi") answers "do you ship to my city?".
-  if (findPlace(t)) return shippingAnswer(state, t);
+  // Self-location ("I'm in Delhi", "I live in Pune") answers "do you ship to my city?".
+  // A city name on its own (or inside an unrelated question) does not.
+  if (findPlace(t) && /\b(i'?m|i\s+am|we\s+are|i\s+live|we\s+live|living|staying|based|from)\b|\b(la|le)\s+irukk\w*/.test(t)) {
+    return shippingAnswer(state, t);
+  }
 
   // --- Small talk ---
   if (RE.greeting.test(t)) {
@@ -865,8 +918,9 @@ async function routeIntent(state: ChatState, raw: string, t: string, ctx: Ctx): 
 
   // --- Not covered: discus-ish -> offer handoff; otherwise redirect. ---
   if (RE.discusish.test(t)) {
-    state.pendingOffer = "handoff";
-    return { reply: ANSWERS.unsure, intent: "unsure" };
+    // FAQ 24: clarify instead of "I'm not sure".
+    state.pendingOffer = null;
+    return { reply: ANSWERS.unclear, intent: "unclear" };
   }
   state.pendingOffer = null;
   return { reply: ANSWERS.offTopic, intent: "off_topic" };
@@ -895,7 +949,7 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
   if (!answered && !RE.declineField.test(t)) {
     const probe = newProbe(state);
     const r = await routeIntent(probe, raw, t, ctx);
-    const generic = ["unsure", "off_topic", "ack", "welcome", "thanks"].includes(r.intent);
+    const generic = ["unsure", "unclear", "off_topic", "ack", "welcome", "thanks"].includes(r.intent);
     const isCity = step === "city"; // free-text city names fall through to accept below
     if (!generic && !(isCity && r.intent === "off_topic")) {
       // Keep flags/tags/interests learnt from the probe, but stay in the handoff.

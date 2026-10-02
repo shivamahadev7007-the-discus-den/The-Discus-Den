@@ -11,6 +11,27 @@
 import type { ChatState } from "./engine.ts";
 import type { TranscriptLine } from "./lead-alert.ts";
 
+export type AlertStatus = "sent" | "suppressed_duplicate" | "suppressed_ip_cap" | "suppressed_global_cap";
+export type AlertDecisionInput = {
+  sessionId: string;
+  phone: string | null;
+  ipHash: string | null;
+  ipCap: number;
+  globalCap: number;
+  nowMs: number;
+};
+
+/** Shared decision rule (DB counts are passed in). */
+export function alertDecision(
+  counts: { byPhone24h: number; byIp24h: number; global1h: number },
+  input: Pick<AlertDecisionInput, "phone" | "ipHash" | "ipCap" | "globalCap">,
+): AlertStatus {
+  if (input.phone && counts.byPhone24h > 0) return "suppressed_duplicate";
+  if (input.ipHash && counts.byIp24h >= input.ipCap) return "suppressed_ip_cap";
+  if (counts.global1h >= input.globalCap) return "suppressed_global_cap";
+  return "sent";
+}
+
 export type MessageRow = {
   sessionId: string;
   role: "user" | "bot";
@@ -29,6 +50,12 @@ export interface ChatStore {
   upsertLead(sessionId: string, source: string, state: ChatState): Promise<void>;
   /** True exactly once per completed lead (atomic). */
   claimLeadAlert(sessionId: string): Promise<boolean>;
+  /**
+   * Flood control for lead alerts, counted in the DB: one alert per phone per
+   * 24 h, at most `ipCap` per IP hash per 24 h, at most `globalCap` per hour.
+   * Records the decision (sent or suppressed_*) and returns it.
+   */
+  decideLeadAlert(input: AlertDecisionInput): Promise<AlertStatus>;
   transcript(sessionId: string): Promise<TranscriptLine[]>;
 }
 
@@ -145,6 +172,34 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
       return rows.length === 1;
     },
 
+    async decideLeadAlert(input) {
+      const sql = await getSql();
+      // One statement: count + decide + record, so concurrent requests see each other's rows
+      // as soon as they commit (small races can let one extra through; caps are soft limits).
+      const rows = await sql.query<{ status: AlertStatus }>(
+        `with c as (
+           select
+             (select count(*) from chat_alerts where $2::text is not null and phone = $2 and status = 'sent' and created_at > now() - interval '24 hours') as by_phone,
+             (select count(*) from chat_alerts where $3::text is not null and ip_hash = $3 and status = 'sent' and created_at > now() - interval '24 hours') as by_ip,
+             (select count(*) from chat_alerts where status = 'sent' and created_at > now() - interval '1 hour') as global_1h
+         )
+         insert into chat_alerts (session_id, phone, ip_hash, status)
+         select $1, $2, $3,
+           case
+             when $2::text is not null and by_phone > 0 then 'suppressed_duplicate'
+             when $3::text is not null and by_ip >= $4 then 'suppressed_ip_cap'
+             when global_1h >= $5 then 'suppressed_global_cap'
+             else 'sent'
+           end
+         from c
+         returning status`,
+        [input.sessionId, input.phone, input.ipHash, input.ipCap, input.globalCap],
+      );
+      const status = rows[0]?.status ?? "suppressed_global_cap";
+      await sql.query("update chat_leads set alert_status = $2, updated_at = now() where session_id = $1", [input.sessionId, status]);
+      return status;
+    },
+
     async transcript(sessionId) {
       const sql = await getSql();
       const rows = await sql.query<{ role: "user" | "bot"; text: string; created_at: string | Date }>(
@@ -161,15 +216,35 @@ export function createMemoryChatStore() {
   const rate = new Map<string, number>();
   const sessions = new Map<string, { source: string; ipHash: string | null; state: ChatState }>();
   const messages: Array<MessageRow & { at: number }> = [];
-  const leads = new Map<string, { source: string; state: ChatState; completed: boolean; alertSent: boolean }>();
+  const leads = new Map<string, { source: string; state: ChatState; completed: boolean; alertSent: boolean; alertStatus?: AlertStatus }>();
+  const alerts: Array<{ sessionId: string; phone: string | null; ipHash: string | null; status: AlertStatus; at: number }> = [];
   const store: ChatStore & {
     sessions: typeof sessions;
     messages: typeof messages;
     leads: typeof leads;
+    alerts: typeof alerts;
   } = {
     sessions,
     messages,
     leads,
+    alerts,
+    async decideLeadAlert(input) {
+      const sent = alerts.filter((a) => a.status === "sent");
+      const day = input.nowMs - 24 * 3600_000;
+      const hour = input.nowMs - 3600_000;
+      const status = alertDecision(
+        {
+          byPhone24h: input.phone ? sent.filter((a) => a.phone === input.phone && a.at > day).length : 0,
+          byIp24h: input.ipHash ? sent.filter((a) => a.ipHash === input.ipHash && a.at > day).length : 0,
+          global1h: sent.filter((a) => a.at > hour).length,
+        },
+        input,
+      );
+      alerts.push({ sessionId: input.sessionId, phone: input.phone, ipHash: input.ipHash, status, at: input.nowMs });
+      const lead = leads.get(input.sessionId);
+      if (lead) lead.alertStatus = status;
+      return status;
+    },
     async hitRateLimit(bucket, windowSeconds, nowMs) {
       const key = `${bucket}@${windowStart(nowMs, windowSeconds).getTime()}`;
       const n = (rate.get(key) ?? 0) + 1;
@@ -194,6 +269,7 @@ export function createMemoryChatStore() {
         state: structuredClone(state),
         completed: Boolean(prev?.completed || state.completed),
         alertSent: prev?.alertSent ?? false,
+        alertStatus: prev?.alertStatus,
       });
     },
     async claimLeadAlert(id) {

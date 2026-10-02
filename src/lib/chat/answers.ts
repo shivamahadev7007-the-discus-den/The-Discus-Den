@@ -111,17 +111,17 @@ export const ANSWERS = {
   doa:
     "If a fish arrives dead, we refund it promptly. Please record a clear unboxing video and send it to Shiva within 24 hours of arrival. Shiva reviews every claim personally.",
   visit:
-    "Yes, store shopping and pickup in Chennai are possible by arrangement. Shiva will share the location and set a time with you. Shall I pass your details?",
-  pickup: "Yes. Chennai pickup is possible. Shiva sets a time with you personally. Want me to pass your details?",
+    "Store shopping and pickup in Chennai are possible by arrangement. Shiva will share the location and set a time with you. Shall I pass your details?",
+  pickup: "Chennai pickup is possible. Shiva sets a time with you personally. Want me to pass your details?",
   quarantine:
-    "Yes. Fish are quarantined, fed and watched before they leave. We hold them until they're ready, and Shiva would rather refuse a shipment than send a stressed fish.",
+    "Every fish is quarantined, fed and watched before it leaves. We hold them until they're ready, and Shiva would rather refuse a shipment than send a stressed fish.",
   holding:
-    "Yes. We hold fish for up to 7 days free. After that there's a maintenance charge of ₹100 per day for the whole purchase, not per fish.",
+    "We can hold fish for up to 7 days free. After that there's a maintenance charge of ₹100 per day for the whole purchase, not per fish.",
   holdingBeyond: "Anything beyond that is Shiva's call. Shall I pass your details?",
-  foodIntro: "Yes. We have",
+  foodIntro: "We have",
   foodOutro: "See thediscusden.com/in-the-den.",
   foodFetchFailed:
-    "Yes, we have frozen foods and pellets. I can't load the live rates right now. You can see them at thediscusden.com/in-the-den. Or I can pass your question to Shiva.",
+    "We have frozen foods and pellets. I can't load the live rates right now. You can see them at thediscusden.com/in-the-den. Or I can pass your question to Shiva.",
   goatHeartPending: "Goat Heart Mix rates are coming soon. Want Shiva to let you know?",
   reseller: "Thanks. Shiva handles trade enquiries personally. Shall I pass your details to him?",
   sickFish:
@@ -132,13 +132,25 @@ export const ANSWERS = {
 
   // Section 1 behaviour
   promptAttack: "I can help with discus and The Discus Den. What are you looking for?",
-  offTopic: "I can help with discus and The Discus Den. What are you looking for?",
+  /** FAQ 23: off-topic requests (code, homework, weather, news...). */
+  offTopic: "I can only help with The Discus Den's fish, food and orders. Is there something there I can help with?",
   areYouHuman: "I'm The Discus Den's chat assistant. Shiva reads every handoff personally.",
+  /** FAQ 21 (pack rev. 19:54): mortality questions. Never "Yes"/"No", never numbers. */
+  mortality:
+    "Every fish is quarantined, fed and watched before it leaves, and Shiva only ships fish that are eating and settled. Happy to pass any detailed questions to him.",
+  /** FAQ 22: claimed promises or offers. Takes priority over FAQ 14 (holding) and FAQ 19 (discounts). */
+  claimedOffer: "I can't confirm or apply that here. Shiva will check it with you personally. Shall I pass your details to him?",
   /** Rule 1/2/3: no stock figures, losses or sources. Not verbatim in the pack. */
   noInternalFigures:
     "I can't share that here. Our available page shows what's ready now: thediscusden.com/available. Want me to narrow it down by size or colour?",
-  /** "Uncertainty: offer the handoff. Don't improvise." */
-  unsure: "I'm not sure about that one. Shall I pass your question to Shiva?",
+  /** FAQ 24: "If still unclear" clarifying question (never just "I'm not sure"). */
+  unclear: "Sorry, I didn't catch that. Are you asking about our fish, prices, or delivery?",
+  /**
+   * Handoff offer for questions the pack doesn't cover (e.g. delivery abroad) and
+   * the output guard's safe replacement. Not verbatim in the pack ("Uncertainty:
+   * offer the handoff"); phrased after FAQ 3.
+   */
+  unsure: "Shiva is the best person for that one. Shall I pass your question to him?",
   thanks: "You're welcome. Anything else I can help with?",
   bye: "Thank you for visiting The Discus Den. Take care.",
 
@@ -163,4 +175,6 @@ export type LeadFlag =
   | "PAYMENT ASKED"
   | "DOA CLAIM"
   | "LONG HOLD"
+  | "MORTALITY ASKED"
+  | "CLAIMED OFFER"
   | `STRAIN NOT LISTED: ${string}`;

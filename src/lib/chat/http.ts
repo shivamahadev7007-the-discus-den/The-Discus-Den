@@ -25,6 +25,16 @@ export const RATE_LIMITS = {
   session: { limit: 20, windowSeconds: 5 * 60 },
   ip: { limit: 60, windowSeconds: 10 * 60 },
 };
+/** Lead-alert flood control defaults (override with env). */
+export const ALERT_CAPS = { ipPer24h: 2, globalPerHour: 20 };
+
+function envInt(env: Env, key: string, fallback: number): number {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
+
 /** Front end gives up at 15 s; answer well before that. */
 const TIME_BUDGET_MS = 11_000;
 
@@ -191,13 +201,25 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
           deps.store.upsertLead(sid, source, result.state),
         ]);
 
-        // --- Lead alert: once per session, only on a completed handoff ---
+        // --- Lead alert: once per session, only on a completed handoff, then flood control ---
         if (result.completedNow && (await deps.store.claimLeadAlert(sid))) {
-          try {
-            const transcript = await deps.store.transcript(sid);
-            await (deps.sendAlert ?? ((l, t) => sendLeadAlert(l, t, env)))({ sessionId: sid, source, state: result.state }, transcript);
-          } catch (err) {
-            console.warn("[chat] lead alert failed (soft)", err);
+          const status = await deps.store.decideLeadAlert({
+            sessionId: sid,
+            phone: result.state.lead.phone ?? null,
+            ipHash,
+            ipCap: envInt(env, "CHAT_ALERT_IP_CAP_24H", ALERT_CAPS.ipPer24h),
+            globalCap: envInt(env, "CHAT_ALERT_GLOBAL_CAP_HOUR", ALERT_CAPS.globalPerHour),
+            nowMs,
+          });
+          if (status !== "sent") {
+            console.warn(`[chat] lead alert ${status} (lead stored in DB)`);
+          } else {
+            try {
+              const transcript = await deps.store.transcript(sid);
+              await (deps.sendAlert ?? ((l, t) => sendLeadAlert(l, t, env)))({ sessionId: sid, source, state: result.state }, transcript);
+            } catch (err) {
+              console.warn("[chat] lead alert failed (soft)", err);
+            }
           }
         }
 

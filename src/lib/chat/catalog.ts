@@ -3,7 +3,8 @@
  *
  * Prices are NEVER hard-coded: they are parsed from the server-rendered HTML
  * of thediscusden.com/available (strains) and /frozen + /pellets (food).
- * Results are cached in the runtime for ~10 minutes. On any fetch or parse
+ * Results are cached in the runtime for CHAT_PRICE_CACHE_SECONDS (default
+ * 60 s; 0 = always fetch live). On any fetch or parse
  * failure the loader returns null and the router replies with the pack's
  * fallback pointing to /available. It never guesses.
  *
@@ -33,7 +34,17 @@ export type FetchLike = (url: string, init?: { signal?: AbortSignal; headers?: R
   text(): Promise<string>;
 }>;
 
-export const CATALOG_CACHE_MS = 10 * 60 * 1000;
+/** Default price cache TTL (Shiva, 2 Oct: ~1 min; 0 means always live). */
+export const DEFAULT_PRICE_CACHE_SECONDS = 60;
+
+/** Parse CHAT_PRICE_CACHE_SECONDS: unset/invalid -> 60, "0" -> 0 (no cache). */
+export function priceCacheMsFromEnv(env: Record<string, string | undefined> = {}): number {
+  const raw = env.CHAT_PRICE_CACHE_SECONDS;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_PRICE_CACHE_SECONDS * 1000;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_PRICE_CACHE_SECONDS * 1000;
+  return Math.floor(n * 1000);
+}
 const FETCH_TIMEOUT_MS = 4000;
 
 // ---------------------------------------------------------------------------
@@ -177,14 +188,16 @@ async function fetchHtml(url: string, fetchImpl: FetchLike): Promise<string | nu
 
 async function cached<T>(
   cache: Cache,
+  ttlMs: number,
   key: string,
   load: () => Promise<T | null>,
   now: () => number,
 ): Promise<T | null> {
+  if (ttlMs <= 0) return load(); // always live
   const slot = cache.get(key) as CacheSlot<T> | undefined;
-  if (slot && now() - slot.at < CATALOG_CACHE_MS) return slot.data;
+  if (slot && now() - slot.at < ttlMs) return slot.data;
   const data = await load();
-  // Failures are not cached, so the next message retries the live page.
+  // Failures are never cached, so the next message retries the live page.
   if (data !== null) cache.set(key, { at: now(), data });
   return data;
 }
@@ -194,7 +207,8 @@ export type CatalogLoader = {
   foods(): Promise<{ frozen: FoodItem[] | null; pellets: FoodItem[] | null }>;
 };
 
-export function createCatalogLoader(opts?: { fetch?: FetchLike; now?: () => number }): CatalogLoader {
+export function createCatalogLoader(opts?: { fetch?: FetchLike; now?: () => number; cacheMs?: number }): CatalogLoader {
+  const ttlMs = opts?.cacheMs ?? DEFAULT_PRICE_CACHE_SECONDS * 1000;
   const fetchImpl: FetchLike = opts?.fetch ?? ((url, init) => fetch(url, init));
   const now = opts?.now ?? Date.now;
   // One cache per loader; the API route creates a single loader per warm
@@ -204,6 +218,7 @@ export function createCatalogLoader(opts?: { fetch?: FetchLike; now?: () => numb
     strains: () =>
       cached(
         store,
+        ttlMs,
         "available",
         async () => {
           const html = await fetchHtml(AVAILABLE_URL, fetchImpl);
@@ -218,6 +233,7 @@ export function createCatalogLoader(opts?: { fetch?: FetchLike; now?: () => numb
       const load = (key: string, url: string) =>
         cached(
           store,
+          ttlMs,
           key,
           async () => {
             const html = await fetchHtml(url, fetchImpl);
