@@ -174,7 +174,7 @@ const RE = {
   owner:
     /\b(who\s+(is|'s|s)\s+(the\s+)?(owner|proprietor|founder|boss|person\s+behind|man\s+behind|guy\s+behind)|who\s+owns|who\s+runs|who\s+(started|founded|is\s+running|is\s+behind)\s+(the\s+den|this|the\s+(shop|store|business))|owner('?s)?\s+name|name\s+of\s+the\s+owner|are\s+you\s+the\s+owner|whose\s+(shop|store|business)|owner\s+(yaar|yaaru|evar)|(yaar|yaaru)\s+owner)\b/,
   human:
-    /\b(are\s+you\s+(a\s+)?(human|person|real|bot|robot|ai|machine)|is\s+this\s+(a\s+)?(bot|human|real\s+person|ai)|am\s+i\s+(talking|chatting)\s+(to|with)|you\s+a\s+bot)\b/,
+    /\b(are\s+(you|u)\s+(a\s+|an\s+)?(human|person|real|bot|robot|ai|machine|chatbot|automated)|is\s+this\s+(a\s+|an\s+)?(bot|human|real\s+person|ai|chatbot|robot|automated|person|live\s+chat)|am\s+i\s+(talking|chatting|speaking)\s+(to|with)|(you|u)\s+(a\s+)?(bot|robot)|(is\s+)?(this|it)\s+(a\s+)?(real\s+)?(person|human)\s+(replying|typing|answering|chatting)|is\s+(anyone|someone)\s+(real|actually)\s+(there|here|typing)|(bot|robot)\s+(hai|aa|ah|ya|or\s+(human|person|real))|(real|actual)\s+person\s+(or|replying|there))\b/,
   talkToShiva:
     /\b(talk\s+to\s+shiva|speak\s+(to|with)\s+shiva|chat\s+with\s+shiva|talk\s+to\s+(a\s+)?(human|person|someone|owner)|real\s+person|contact\s+shiva|call\s+shiva|reach\s+shiva|message\s+shiva|shiva'?s?\s+(number|phone|whatsapp|contact|mobile|email)|your\s+(number|phone|whatsapp|contact|mobile|email)|phone\s+number|whatsapp\s+number|mobile\s+number|contact\s+(number|details|info)|call\s+me|call\s+back|shiva\s+kitta|pesanum|pesa\s+venum|connect\s+me|number\s+(kudunga|kudu|venum|send)|call\s+(pannanum|pannunga|panna|pannuga)|phone\s+line|business\s+(number|phone|line)|contact\s+number|your\s+contact)\b/,
   reseller:
@@ -615,10 +615,13 @@ function strainWordsIn(t: string): string[] {
   return hits;
 }
 
+/** LB-6 D2: a filter with no match points back to the page (no generic handoff offer). */
+const NOTHING_MATCHES = "Nothing on our available page matches that right now. Full list: thediscusden.com/available.";
+
 async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx: Ctx, kind: "price" | "available" | "strain"): Promise<Turn | null> {
   const cards = await liveStrains(ctx);
   if (!cards) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.liveFetchFailed, intent: `${kind}_fallback` };
   }
 
@@ -634,7 +637,7 @@ async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx
     const lines = match.cards.slice(0, 5).map(cardLine).join("\n");
     const extra = [ANSWERS.shippingExtra, VOLUME_DISCOUNT_LINE];
     if (match.bundled) {
-      state.pendingOffer = "handoff";
+      state.pendingOffer = null; // LB-6 D2
       return { reply: join(lines, extra.join(" "), ANSWERS.bundledVariant), intent: `${kind}_strain` };
     }
     state.pendingOffer = null;
@@ -652,9 +655,9 @@ async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx
 
   const filtered = filterCards(raw, cards);
   if (filtered && !filtered.length) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return {
-      reply: "Nothing on our available page matches that right now. Full list: thediscusden.com/available. Want me to ask Shiva about it?",
+      reply: NOTHING_MATCHES,
       intent: "available_filtered_none",
     };
   }
@@ -665,9 +668,9 @@ async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx
     const cap = budget ? Number(budget[3]!.replace(/,/g, "")) : Infinity;
     pool = [...pool].filter((c) => c.price <= cap).sort((a, b) => a.price - b.price);
     if (!pool.length) {
-      state.pendingOffer = "handoff";
+      state.pendingOffer = null; // LB-6 D2
       return {
-        reply: "Nothing on our available page matches that right now. Full list: thediscusden.com/available. Want me to ask Shiva about it?",
+        reply: NOTHING_MATCHES,
         intent: "available_filtered_none",
       };
     }
@@ -704,7 +707,7 @@ function stockLine(c: StrainCard): string {
 async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
   const cards = await allStrains(ctx);
   if (!cards || !cards.length) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.stockFetchFailed, intent: "stock_fallback" };
   }
   const match = matchStrains(raw, cards);
@@ -726,7 +729,7 @@ async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): 
   }
   const listed = cards.filter((c) => c.available && c.stock !== undefined && c.stock > 0);
   if (!listed.length) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.stockFetchFailed, intent: "stock_fallback" };
   }
   state.pendingOffer = "narrow";
@@ -760,11 +763,11 @@ async function foodAnswer(state: ChatState, ctx: Ctx, goat: boolean): Promise<Tu
       state.pendingOffer = null;
       return { reply: `${foodLine(ghm)}. ${ANSWERS.foodOutro}`, intent: "food_goat_live" };
     }
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.goatHeartPending, intent: "food_goat_pending" };
   }
   if (!foods.frozen && !foods.pellets) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.foodFetchFailed, intent: "food_fallback" };
   }
   const frozen = (foods.frozen ?? []).filter((f) => f.packs.length);
@@ -774,7 +777,7 @@ async function foodAnswer(state: ChatState, ctx: Ctx, goat: boolean): Promise<Tu
   if (frozen.length) parts.push(`frozen foods (${frozen.map(foodLine).join("; ")})`);
   if (pellets.length) parts.push(pellets.map(foodLine).join("; "));
   if (!parts.length) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.foodFetchFailed, intent: "food_fallback" };
   }
   state.pendingOffer = null;
@@ -786,7 +789,7 @@ async function beginnerAnswer(state: ChatState, ctx: Ctx): Promise<Turn> {
   state.tags.history ??= "first-timer";
   const cards = await liveStrains(ctx);
   const yd = cards?.find((c) => /^yellow diamonds?$/i.test(c.name.trim()));
-  state.pendingOffer = "handoff";
+  state.pendingOffer = null; // LB-6 D2: no generic connect offer
   if (!yd) return { reply: ANSWERS.beginnerNotListed, intent: "beginner_handoff" };
   if (!state.interests.includes(yd.name)) state.interests.push(yd.name);
   return {
@@ -872,9 +875,25 @@ const HUMAN_PUSH = new RegExp(
     String.raw`\b(give|send|share|tell)\s+(me\s+)?(your|his|the\s+owner'?s?|owner'?s?|shiva'?s?)\s+(number|phone|contact|mobile|whatsapp|email)\b|\bowner'?s?\s+(number|contact|phone|mobile|whatsapp|email)\b`,
     String.raw`\b(anyone|anybody|someone)\s+(there|available|real|from\s+the\s+den)\b|\bnot\s+a\s+bot\b|\b(no|stop)\s+(the\s+)?bot\b|\bdon'?t\s+want\s+(a\s+|the\s+|to\s+talk\s+to\s+a\s+)?bot\b|\bi\s+want\s+(a\s+)?(human|person|shiva|the\s+owner)\b`,
     String.raw`\bcall\s+me\b|\bcall\s+(back|now|asap)\b|\bconnect\s+(me|us)\b|\burgent\w*\b[^.?!]*\b(connect|call|talk|speak|shiva|owner|human)\b|\bplease\s+connect\b`,
+    // LB-6 A11: basic Hinglish pushes (reply stays English; Hindi replies are BL-1).
+    String.raw`\b(owner|shiva|malik|maalik|insaan|insan|aadmi|admi|banda|bande|kisi|kisi\s+(insaan|insan|aadmi|admi|bande))\s+(se|say|ko)\s+(baat|bat|baath)\b|\b(baat|bat)\s+(karao|karwao|krao|karvao|karwa\s+do|kara\s+do|karni\s+hai|karna\s+hai|krni\s+hai|karni|karna|karunga|karna\s+chahta|karna\s+chahti)\b|\b(number|phone\s+number|contact|mobile\s+number)\s+(do|dedo|de\s+do|dijiye|dena|bhejo|bhej\s+do|chahiye|milega)\b|\b(call|phone)\s+(karo|karna|kar\s+do|karwao|kijiye|karein)\b|\b(insaan|insan|aadmi|admi|human|asli\s+(insaan|aadmi))\s+(chahiye|se\s+baat|bhejo)\b`,
     String.raw`\b(owner|shiva|ungal\s+owner|anna)\s+kitta\s+(pesa\w*|pesu\w*|connect|call)\b|\b(owner|shiva)\s+(number|contact)\s+(kudunga|kudu|venum|tharunga|anuppunga)\b|\b(pesanum|pesa\s+venum|pesa\s+mudiyuma|pesalama|pesunga)\b|\bcall\s+(pannunga|pannu|panna\s+mudiyuma|pannalama)\b|\b(aal|aalu|manushan)\s+(venum|kitta)\b`,
   ].join("|"),
 );
+/** LB-6 B3: "can I order on chat itself?" -> No, orders go through the site. */
+const ORDER_IN_CHAT =
+  /\b(order|buy|book|purchase|reserve)\s+(it\s+|them\s+|fish\s+)?(on|in|through|via|over|using|from)\s+(the\s+|this\s+)?(chat|chatbot|bot|whatsapp|here)\b|\b(can|could|may|do)\s+(i|we)\s+(just\s+)?(order|buy|book|purchase)\s+(here|right\s+here|now\s+here|from\s+you\s+here)\b|\b(can|could|will)\s+(you|u)\s+(take|book|place|note)\s+(my|the|an|our)\s+order\b|\b(take|book|place)\s+(my|the|an)\s+order\s+(here|on\s+chat|in\s+chat|via\s+chat)\b|\bchat\s+(itself|la\s+order|mein\s+order)\b|\bchat\s+(la|le|mein|me)\s+(order|book)\w*/;
+/** LB-6 B6: "how will I know you got my order?" -> Place request notifies Shiva, who contacts you. */
+const ORDER_RECEIVED =
+  /\bhow\s+(will|would|do|can|shall)\s+i\s+know\b[^?.]*\b(order|request|got\s+it|received|placed|went\s+through)\b|\b(did|have|has)\s+(you|u|shiva|the\s+den)\s+(get|got|receive|received|seen?)\s+(my|our|the)\s+(order|request)\b|\b(will|do)\s+(i|we)\s+get\s+(a\s+|any\s+)?(confirmation|notification|reply|call\s+back|message)\b|\bwhat\s+happens\s+(after|once|when)\s+(i\s+)?(place|order|placing|tap|submit)\w*|\b(order|request)\s+(confirmation|status|received)\b|\b(is|was)\s+my\s+(order|request)\s+(received|placed|confirmed|through)\b|\bwho\s+(will\s+)?(contact|call|reply\s+to)\s+me\b/;
+/** LB-6 C7: collecting at the railway station is SOP step 4, not Chennai store pickup. */
+const STATION = /\b(railway|station|platform|rail\s+agent|train\s+agent|porter|ported)\b/;
+/** LB-6 C5: full amount / advance questions -> the SOP payment step. */
+const PAY_SPLIT =
+  /\b(full\s+(amount|payment|money)|pay\s+(it\s+)?all|whole\s+amount|entire\s+amount|advance|half|upfront|up\s+front|in\s+full|balance|instal+ments?|pay\s+(first|before|later|after|on\s+delivery)|before\s+(dispatch|shipping)|token\s+amount|part\s+payment)\b/;
+/** LB-6 D1: light small talk. */
+const SMALL_TALK =
+  /\b(just\s+(chatting|browsing|bored|checking\s+(in|you\s+out))|favou?rite\s+(fish|discus|strain|colou?r|one)|how\s+are\s+(you|u)|how'?s\s+it\s+going|what'?s\s+up|wassup|lol|lmao|haha+|bored|time\s?pass|who\s+made\s+you|do\s+you\s+like\s+(fish|discus))\b/;
 const FIRST_TIMER =
   /\b(first[\s-]?time(r)?\s+(buyer|buying|customer|order|ordering|here|purchase|with\s+you)|my\s+first\s+(order|purchase|time)|first\s+order|i'?m\s+(a\s+)?first[\s-]?timer|i'?m\s+new\s+(here|to\s+(this|the\s+den|ordering|buying|your\s+shop))|never\s+(bought|ordered)\s+(from|here|before)|new\s+customer|how\s+does\s+(it|this|the\s+(process|order\w*))\s+work|what\s+(is|'s)\s+the\s+process)\b/;
 /** "Keep the fish longer" asks: only these get the 7-days-free / ₹100-a-day line. */
@@ -1171,7 +1190,8 @@ export const INTENT_RULES: readonly IntentRule[] = [
   },
   {
     id: "payment_details", tier: "safety", faq: "Rule 5a",
-    test: (m) => isPaymentDetails(m.t, m.raw),
+    // LB-6 B6: "did you get my order?" is about the request, not a payment.
+    test: (m) => isPaymentDetails(m.t, m.raw) && !(ORDER_RECEIVED.test(m.t) && !RE.payment.test(m.t)),
     run: ({ state }) => { addFlag(state, "PAYMENT ASKED"); state.pendingOffer = null; return { reply: ANSWERS.paymentDetails, intent: "payment_details" }; },
   },
   {
@@ -1218,7 +1238,12 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "are_you_human", tier: "safety", faq: "Rules: are you a person",
     test: (m) => RE.human.test(m.t),
-    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.areYouHuman, intent: "are_you_human" }; },
+    // LB-6 A4: "is this a bot? I want a real person" -> who we are + the site steer.
+    run: ({ state }) => {
+      state.pendingOffer = null;
+      state.humanPushes = (state.humanPushes ?? 0) + 1;
+      return { reply: `${ANSWERS.areYouHuman} ${state.humanPushes > 1 ? ANSWERS.humanPushShort : ANSWERS.humanPush}`, intent: "are_you_human" };
+    },
   },
   {
     // LB-6 (Shiva, 3 Oct): pushes to reach a human / Shiva are steered to the
@@ -1251,6 +1276,24 @@ export const INTENT_RULES: readonly IntentRule[] = [
   },
 
   // ---- 3. FAQs ----
+  {
+    // LB-6 B3 (Lea, 3 Oct): orders never happen in the chat.
+    id: "order_in_chat", tier: "faq", faq: "LB-6: order via site",
+    test: (m) => ORDER_IN_CHAT.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.orderInChat, intent: "order_in_chat" }; },
+  },
+  {
+    // LB-6 B6: confirmation = "Request placed" on the site; Shiva is notified and contacts the customer.
+    id: "order_received", tier: "faq", faq: "LB-6: request placed",
+    test: (m) => ORDER_RECEIVED.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.orderReceived, intent: "order_received" }; },
+  },
+  {
+    // LB-6 C5: "full amount first?" -> half advance at the holding tank, balance on shipping day.
+    id: "pay_advance", tier: "faq", faq: "LB-6: SOP step 5",
+    test: (m) => PAY_SPLIT.test(m.t) && !RE.shipCost.test(m.t) && !RE.holding.test(m.t) && (RE.payment.test(m.t) || /\b(amount|money|full|whole)\b/.test(m.t)),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.payAdvance, intent: "pay_advance" }; },
+  },
   {
     // Equipment we don't sell (filters, heaters, tanks...): FAQ 23 redirect.
     id: "equipment", tier: "faq", faq: "FAQ 23",
@@ -1316,7 +1359,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "pair_or_single", tier: "faq", faq: "FAQ 4",
     test: (m) => RE.pairSingle.test(m.t),
-    run: ({ state }) => { state.pendingOffer = "handoff"; return { reply: ANSWERS.pairOrSingle, intent: "pair_or_single" }; },
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.pairOrSingle, intent: "pair_or_single" }; },
   },
   {
     id: "per_piece", tier: "faq", faq: "FAQ 2 (per piece)",
@@ -1342,6 +1385,12 @@ export const INTENT_RULES: readonly IntentRule[] = [
     id: "ship_cost", tier: "faq", faq: "FAQ 8",
     test: (m) => RE.shipCost.test(m.t),
     run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.shippingCost, intent: "ship_cost" }; },
+  },
+  {
+    // LB-6 C7: "can I pick up from the station?" -> SOP step 4 (railway agent) + the SOP.
+    id: "station_pickup", tier: "faq", faq: "LB-6: SOP step 4",
+    test: (m) => STATION.test(m.t) && !/\b(fire|police|bus)\s+station\b/.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; state.lead.delivery ??= "train shipping"; return { reply: join(ANSWERS.stationPickup, SOP_BLOCK), intent: "station_pickup" }; },
   },
   {
     id: "pickup", tier: "faq", faq: "FAQ 12",
@@ -1389,7 +1438,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "care_tips", tier: "faq", faq: "Quick tap: care tips",
     test: (m) => RE.care.test(m.t),
-    run: ({ state }) => { state.pendingOffer = "handoff"; return { reply: ANSWERS.careTips, intent: "care_tips" }; },
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.careTips, intent: "care_tips" }; }, // LB-6 D2
   },
   {
     // A strain, colour or size named on its own ("yellow diamonds?", "red ones", "any 5 inch?").
@@ -1430,6 +1479,12 @@ export const INTENT_RULES: readonly IntentRule[] = [
   // ---- 4. small talk ----
   { id: "welcome", tier: "smalltalk", faq: "Welcome", test: (m) => RE.greeting.test(m.t), run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.welcome, intent: "welcome" }; } },
   { id: "thanks", tier: "smalltalk", faq: "Small talk", test: (m) => RE.thanks.test(m.t), run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.thanks, intent: "thanks" }; } },
+  {
+    // LB-6 D1: chit-chat gets a warm redirect to the stock page.
+    id: "small_talk", tier: "smalltalk", faq: "LB-6: small talk",
+    test: (m) => SMALL_TALK.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.smallTalk, intent: "small_talk" }; },
+  },
   { id: "bye", tier: "smalltalk", faq: "Small talk", test: (m) => RE.bye.test(m.t), run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.bye, intent: "bye" }; } },
   {
     id: "ack", tier: "smalltalk", faq: "Small talk",

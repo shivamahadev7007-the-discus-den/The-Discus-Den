@@ -30,7 +30,7 @@ export const SHIP_STATES = [
 export const QUICK_TAPS = ["What fish are available?", "Care tips", "Talk to Shiva"] as const;
 
 export const VOLUME_DISCOUNT_LINE =
-  "Orders of 5–9 fish get 5% off and 10 or more get 10% off, applied in the cart.";
+  "Orders of 5–9 fish get 5% off and 10 or more get 10% off, applied in the Shopping Bag.";
 
 export const PER_PIECE_LINE = "All prices are per piece. A pair is two pieces.";
 
@@ -41,10 +41,12 @@ export const ANSWERS = {
   availableIntro: "Here's what's in the window now:",
   availableOutro: "Full list: thediscusden.com/available\nWant me to narrow it down by size or colour?",
   liveFetchFailed:
-    "I can't load the live list right now. You can see it here: thediscusden.com/available. Or I can pass your question to Shiva.",
+    "I can't load the live list right now. You can see it here: thediscusden.com/available.",
   strainNotListed:
     "That one isn't on our available page right now. Want me to ask Shiva about it?",
-  bundledVariant: "That card covers more than one variant at one listed price. For a specific variant, Shiva can advise. Shall I pass your details?",
+  /** LB-6 D2: no generic handoff offer; Shiva advises after the request is placed. */
+  bundledVariant:
+    "That card covers more than one variant at one listed price. Once you place a request from the Shopping Bag, Shiva is notified and can advise on the variant.",
   careTips: [
     "A few calm basics:",
     "1. Settle the tank fully before fish arrive. If yours isn't ready yet, we can hold first-timers' fish while it settles.",
@@ -52,8 +54,8 @@ export const ANSWERS = {
     "3. Do regular water changes. Clean, stable water matters most.",
     "4. Keep the temperature steady, around 28–30°C.",
     "5. Feed a variety: quality pellets plus frozen foods.",
-    "6. Ask before you buy. Shiva will help match fish to your tank.",
-    "Want me to connect you with Shiva?",
+    "6. Shiva will help match fish to your tank once your request is placed.",
+    "Everything else is on thediscusden.com. Once you place a request from the Shopping Bag, Shiva is notified and takes it from there.",
   ].join("\n"),
 
   // Section 3: handoff script
@@ -73,11 +75,11 @@ export const ANSWERS = {
       : "Thank you. I've passed this to Shiva with our chat. He'll get back to you personally.",
   /** Not in the pack: used when no valid number was given, so nothing is "passed". */
   handoffNoNumber:
-    "No problem. Without a number Shiva can't reach you. Whenever you're ready, tap Talk to Shiva and I'll take your details.",
+    "No problem. Without a number Shiva can't reach you. You're welcome to share it here any time.",
   /** Not in the pack: a number without a name can't be marked as a lead. */
   handoffNeedName: "Thanks. What name should Shiva use when he reaches you?",
   handoffNoName:
-    "No problem. Shiva needs a name and number to reach you. Whenever you're ready, tap Talk to Shiva and I'll take your details.",
+    "No problem. Shiva needs a name and number to reach you. You're welcome to share them here any time.",
   handoffAlreadyDone:
     "I've already passed your details to Shiva with our chat. He'll get back to you personally. Anything else I can help with?",
   handoffDeclined: "No problem. Anything else I can help with?",
@@ -87,11 +89,12 @@ export const ANSWERS = {
     "Our live list is here: thediscusden.com/available. Each card shows the strain, size and price. Want me to narrow it down by size or colour?",
   shippingExtra: "Shipping is extra. Shiva sends a shipping estimate after your order.",
   beginnerIntro: "A good entry strain is",
-  beginnerOutro: "Shiva can help match fish to your tank too. Want me to connect you?",
+  /** LB-6 D2: these three no longer offer a handoff; they point to the site's request flow. */
+  beginnerOutro: "Once you place a request from the Shopping Bag, Shiva is notified and can help match fish to your tank too.",
   beginnerNotListed:
-    "Shiva is the best person to suggest a starter strain from what's ready now. Shall I pass your details?",
+    "Our live list is at thediscusden.com/available. Once you place a request from the Shopping Bag, Shiva is notified and can suggest a starter strain from what's ready now.",
   pairOrSingle:
-    "That depends on your tank and plans. Shiva will advise you personally. Shall I connect you?",
+    "That depends on your tank and plans. Shiva will advise you personally once you place a request from the Shopping Bag on thediscusden.com.",
   shipInStates:
     "We deliver by train across Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana, Maharashtra, Madhya Pradesh and Odisha. Chennai pickup is also possible.",
   shipOtherState:
@@ -120,6 +123,21 @@ export const ANSWERS = {
   sopIntro: "If you're outside Chennai or ordering for the first time, here's how it works:",
   sop:
     "1. Your fish are moved to a separate customer holding tank.\n2. They're fasted for two days, and you get an update from us every day during this time.\n3. Shipping happens on day three, most likely the coming Saturday or Sunday.\n4. Shipping is by train. We give you a railway agent's contact: you can collect the fish at the station by speaking with the agent, or have them ported from the station to your place.\n5. Payment: half the amount as advance once your fish are moved to the holding tank, and the balance on shipping day, before dispatch.",
+  /** LB-6 B3 (Lea, 3 Oct): "can I order on chat?" -> plain "No" + the site steps (audit exemption). */
+  orderInChat:
+    "No, orders go through our website, not this chat. To order: open Current Stock (thediscusden.com/available), choose a quantity on a card, open the Shopping Bag, tap Finalize, add your details and tap Place request. There's no payment on the site. Once your request is placed, Shiva is notified and takes it from there.",
+  /** LB-6 B6: how the customer knows the request went through (site wording: "Request placed"). */
+  orderReceived:
+    "When you tap Place request in the Shopping Bag, the site shows \"Request placed\" and Shiva is notified straight away. He then contacts you on the WhatsApp number you entered in the form.",
+  /** LB-6 C7: station collection = SOP step 4 (train), not Chennai store pickup. */
+  stationPickup:
+    "For train orders, we give you a railway agent's contact: you can collect the fish at the station by speaking with the agent, or have them ported from the station to your place.",
+  /** LB-6 C5: SOP payment step. Method only; never a number. */
+  payAdvance:
+    "Not the full amount up front. You pay half the amount as advance once your fish are moved to the holding tank, and the balance on shipping day, before dispatch. There's no payment on the site: Shiva shares the payment details himself, so please only pay details he gives you directly.",
+  /** LB-6 D1: light small talk gets a warm redirect instead of the clarifying question. */
+  smallTalk:
+    "Happy to chat discus! I'm here for The Discus Den's fish, food and orders. You can see what's ready now at thediscusden.com/available.",
   howToPay:
     "There's no payment on the site. Payment is by GPay. Shiva shares the payment details himself when he confirms your order, so please only pay details he gives you directly.",
   paymentDetails:
@@ -148,8 +166,8 @@ export const ANSWERS = {
   foodIntro: "We have",
   foodOutro: "See thediscusden.com/in-the-den.",
   foodFetchFailed:
-    "We have frozen foods and pellets. I can't load the live rates right now. You can see them at thediscusden.com/in-the-den. Or I can pass your question to Shiva.",
-  goatHeartPending: "Goat Heart Mix rates are coming soon. Want Shiva to let you know?",
+    "We have frozen foods and pellets. I can't load the live rates right now. You can see them at thediscusden.com/in-the-den.",
+  goatHeartPending: "Goat Heart Mix rates are coming soon. Keep an eye on thediscusden.com/in-the-den.",
   reseller: "Thanks. Shiva handles trade enquiries personally. Shall I pass your details to him?",
   sickFish:
     "Sorry to hear that. I can't give health or treatment advice here, but Shiva can talk it through with you personally. Shall I pass your details to him now?",
@@ -161,7 +179,8 @@ export const ANSWERS = {
   promptAttack: "I can help with discus and The Discus Den. What are you looking for?",
   /** FAQ 23: off-topic requests (code, homework, weather, news...). */
   offTopic: "I can only help with The Discus Den's fish, food and orders. Is there something there I can help with?",
-  areYouHuman: "I'm The Discus Den's chat assistant. Shiva reads every handoff personally.",
+  /** LB-6 A4: followed by the site steer (engine). */
+  areYouHuman: "I'm The Discus Den's chat assistant, not a person.",
   /** FAQ 21 (pack rev. 19:54): mortality questions. Never "Yes"/"No", never numbers. */
   mortality:
     "Every fish is quarantined, fed and watched before it leaves, and Shiva only ships fish that are eating and settled. Happy to pass any detailed questions to him.",
@@ -175,10 +194,10 @@ export const ANSWERS = {
   stockPage: "thediscusden.com/available",
   stockIntro: "Here's what the site shows as in stock right now:",
   stockOutro:
-    "Availability is as shown on thediscusden.com/available right now. Shiva confirms quantities with you personally. Want me to pass your details to him?",
+    "Availability is as shown on thediscusden.com/available right now. Shiva confirms quantities with you personally. Want me to pass your details to him?", // [PENDING Shiva ruling: quantity handoff]
   stockListOutro: "Full list: thediscusden.com/available\nWant me to narrow it down by size or colour?",
   stockFetchFailed:
-    "I can't load live availability right now. You can check thediscusden.com/available. Or I can pass your question to Shiva.",
+    "I can't load live availability right now. You can check thediscusden.com/available.",
   /**
    * LB-5 (Shiva, 3 Oct): sizes, ages, cheaper options or anything else not
    * listed get a warm but firm close. No cards, no prices, no discount line,
@@ -199,7 +218,9 @@ export const ANSWERS = {
   lossSafetyNet:
     "Every fish is quarantined, fed and settled before it ships, and we don't share loss figures. If a fish arrived dead, please send Shiva a clear unboxing video within 24 hours of arrival. He reviews every claim personally, and I can't approve refunds here. Shall I pass your details to him?",
   /** Last-resort reply (pack wording, approved 2 Oct): the output guard's safe replacement. */
-  unsure: "Shiva is the best person for that one. Shall I pass your question to him?",
+  /** LB-6 D2: no generic handoff offer; steer to the site. */
+  unsure:
+    "Everything is on thediscusden.com and it's self-explanatory. Once you place a request from the Shopping Bag, Shiva is notified and takes it from there.",
   /** FAQ 25: delivery abroad. Hand off; flags OUTSIDE 8 STATES + REMOTE. Never promise international shipping. */
   shipAbroad:
     "We deliver within India by train. Shiva can tell you whether anything is possible for your location. Shall I pass your details to him?",

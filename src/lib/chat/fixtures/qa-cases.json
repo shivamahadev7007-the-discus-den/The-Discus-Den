@@ -812,7 +812,7 @@
    "turns": [
     {
      "in": "Do I need to pay advance?",
-     "expect": "FAQ 7"
+     "expect": "LB-6 advance"
     }
    ]
   },
@@ -821,7 +821,7 @@
    "turns": [
     {
      "in": "Should I pay half now and balance later?",
-     "expect": "FAQ 7"
+     "expect": "LB-6 advance"
     }
    ]
   },
