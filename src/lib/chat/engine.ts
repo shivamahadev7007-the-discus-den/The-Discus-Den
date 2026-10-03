@@ -13,7 +13,7 @@
 
 import {
   ANSWERS,
-  HUMAN_PUSH_FIRM,
+  firmPushReply,
   OWNER_FALLBACK,
   outOfAreaReply,
   ownerReply,
@@ -962,6 +962,8 @@ const REACH_LONG = ["connect", "contact", "speak", "reach"];
 const REACH_SHORT = ["talk", "call", "ring", "ping", "phone"];
 /** Verbs whose object may be "you" ("how can I contact you"); "talk to you about tanks" is not a push. */
 const REACH_YOU = new Set(["connect", "contact", "reach", "call", "phone", "ring"]);
+/** Verbs whose object may be "me" ("conect me", "call me"); "the fish reach me" is not a push. */
+const REACH_ME = new Set(["connect", "call", "phone", "ring"]); // not "contact": "who will contact me?" is B6
 
 /** Damerau-Levenshtein distance (words are short, so this stays fast). */
 function editDistance(a: string, b: string): number {
@@ -980,22 +982,50 @@ function editDistance(a: string, b: string): number {
 function sortedLetters(w: string): string {
   return [...w].sort().join("");
 }
-/** The reach verb a word stands for: exact, one typo for long verbs, a swapped pair for short ones ("tlak"). */
+/** "taalk" -> "talk", "connnect" -> "connect": collapse runs of the same letter. */
+function squeeze(w: string): string {
+  return w.replace(/(.)\1+/g, "$1");
+}
+/** w is v with exactly one letter left out ("cal" for "call", "conect" for "connect"). */
+function droppedOne(w: string, v: string): boolean {
+  if (w.length !== v.length - 1) return false;
+  for (let i = 0; i < v.length; i++) if (v.slice(0, i) + v.slice(i + 1) === w) return true;
+  return false;
+}
+/**
+ * The reach verb a word stands for. Long verbs (connect, contact, speak, reach): exact,
+ * doubled letters, or one dropped / wrong / swapped letter. Short verbs (talk, call...):
+ * exact, doubled letters ("taalk"), one dropped letter ("cal") or a swapped pair ("tlak"),
+ * but never a different letter, so "walk", "tall" and "tell" stay out.
+ */
 function reachVerb(w: string): string | null {
   const base = w.replace(/(ing|ed|s)$/, "");
-  for (const v of [...REACH_LONG, ...REACH_SHORT]) if (w === v || base === v) return v;
-  if (w.length >= 4) for (const v of REACH_LONG) if (editDistance(w, v) <= 1 || editDistance(base, v) <= 1) return v;
-  for (const v of REACH_SHORT) if (w.length === v.length && w !== v && sortedLetters(w) === sortedLetters(v) && editDistance(w, v) === 1) return v;
+  for (const v of [...REACH_LONG, ...REACH_SHORT]) if (w === v || base === v || squeeze(w) === squeeze(v)) return v;
+  // Typos keep the first letter ("teach", "beach", "all", "walk" never count).
+  if (w.length >= 4) {
+    for (const v of REACH_LONG) {
+      if (w[0] !== v[0]) continue;
+      if (editDistance(w, v) <= 1 || editDistance(base, v) <= 1 || editDistance(squeeze(w), v) <= 1) return v;
+    }
+  }
+  for (const v of REACH_SHORT) {
+    if (w[0] !== v[0]) continue;
+    if (w.length === v.length && sortedLetters(w) === sortedLetters(v) && editDistance(w, v) === 1) return v;
+    if (w.length >= 3 && (droppedOne(w, v) || droppedOne(squeeze(w), v))) return v;
+  }
   return null;
 }
 const REACH_PHRASE =
   /\bput\s+(me|us)\s+through\b|\bget\s+(me|us)\s+(through\s+to\s+|to\s+)?(the\s+|a\s+|an\s+|some\s+)?(shiva|siva|owner|someone|somebody|person|human|manager|boss|staff|him|real\s+person)\b|\b(get|be|keep)\s+in\s+touch\b|^(shiva|siva)(\s+(please|pls|plz|sir|anna|now))?$|^(the\s+)?(owner|human|a\s+human|real\s+person|manager|a\s+person)\s+(please|pls|plz|now)$/;
+/** LB-14 (Kiara 8a88e4e): "I need a human now", "want a real person", "human please", "any human there?". */
+const HUMAN_ASK =
+  /\b(need|want|get|give|send|bring)\s+(me\s+)?(a\s+|an\s+|some\s+|to\s+(talk|speak|chat)\s+(to|with)\s+(a\s+)?)?(real\s+|actual\s+|live\s+|proper\s+)?(human|person|human\s+being|people)\b(?!\s+(to|for|who|at)\s+(?!(talk|speak|chat|help)\b))|\b(human|real\s+person|person)\s+(please|pls|plz|now|asap|here|needed)\b|\b(any|a|some)\s*(human|real\s+person|person|one|body)\s+(there|here|around|available|online)\b|\bis\s+there\s+(a\s+|any\s+)?(human|real\s+person|person|anyone|anybody|someone)\b|^(human|a\s+human|real\s+person|a\s+real\s+person)\s*\??$/;
 /** An explicit person in the message (used to keep "can I call to visit the store" on the visit answer). */
 const PERSON_WORD = /\b(shiva|siva|owner|someone|somebody|anyone|person|human|manager|him|staff|boss|agent)\b/;
 
 /** LB-14: an ask to reach Shiva / a person that the LB-6 patterns miss. */
 export function isReachAsk(t: string): boolean {
-  if (REACH_PHRASE.test(t)) return true;
+  if (REACH_PHRASE.test(t) || HUMAN_ASK.test(t)) return true;
   const words = t.replace(/[^a-z' ]/g, " ").split(/\s+/).filter(Boolean);
   for (let i = 0; i < words.length; i++) {
     const verb = reachVerb(words[i]!);
@@ -1003,6 +1033,7 @@ export function isReachAsk(t: string): boolean {
     for (const w of words.slice(i + 1, i + 6)) {
       if (REACH_TARGET.has(w.replace(/'s$/, ""))) return true;
       if ((w === "you" || w === "u") && REACH_YOU.has(verb)) return true;
+      if (w === "me" && REACH_ME.has(verb)) return true;
     }
   }
   return false;
@@ -1017,7 +1048,7 @@ function pushReply(state: ChatState): string {
   const n = (state.humanPushes = (state.humanPushes ?? 0) + 1);
   if (n === 1) return ANSWERS.humanPush;
   if (n === 2) return ANSWERS.humanPushShort;
-  return HUMAN_PUSH_FIRM[(n - 3) % HUMAN_PUSH_FIRM.length]!;
+  return firmPushReply(n - 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,7 +1059,7 @@ type Pleasantry = "greeting" | "thanks" | "bye" | "new";
 const PLEASANTRY: Array<[Pleasantry, RegExp]> = [
   ["bye", /\b(bye(\s+bye)?|byee+|goodbye|good\s+bye|see\s+(you|u|ya)(\s+(later|soon|again))?|good\s*night|tata|take\s+care|catch\s+you\s+later|cya)\b/g],
   ["thanks", /\b(thanks?(\s+(a\s+lot|so\s+much|very\s+much|again|a\s+ton))?|thank\s+(you|u)(\s+(so|very)\s+much|\s+a\s+lot)?|thanku|thankyou|thx|thnx|thanx|tnx|ty|nandri|dhanyavad|shukriya|much\s+appreciated|appreciate\s+it)\b/g],
-  ["new", /\b((i'?m|i\s+am|im|am)\s+(a\s+|an\s+)?(new|beginner|newbie|novice|fresher|starter)(\s+(discus\s+)?(hobbyist|keeper|aquarist|fish\s*keeper|here|to\s+(the\s+)?(discus|hobby|fishkeeping|fish\s+keeping|this\s+hobby|discus\s+keeping)))?|(new|beginner|newbie|novice)\s+(discus\s+)?(hobbyist|keeper|aquarist|fish\s*keeper)(\s+here)?|(beginner|newbie)\s+here|just\s+(started|starting|getting\s+started)(\s+with\s+discus)?)\b/g],
+  ["new", /\b((i'?m|i\s+am|im|am)\s+(a\s+|an\s+)?(new|beginner|newbie|novice|fresher|starter)(\s+(discus\s+)?(hobbyist|keeper|aquarist|fish\s*keeper|here|to\s+(the\s+)?(discus|hobby|fishkeeping|fish\s+keeping|this\s+hobby|discus\s+keeping)))?|(new|beginner|newbie|novice)\s+(discus\s+)?(hobbyist|keeper|aquarist|fish\s*keeper)(\s+here)?|(beginner|newbie|new)\s+here|new\s+to\s+(this\s+|the\s+)?(discus|hobby|fishkeeping|fish\s+keeping|aquariums?|discus\s+keeping|this)|just\s+(started|starting|getting\s+started)(\s+with\s+discus)?)\b/g],
   ["greeting", /\b(hi+|hello+|helo|hey+|hai|hiya|heya|howdy|vanakkam|namaste|namaskaram|namaskar|good\s+(morning|afternoon|evening|day)|gm|hola|greetings)\b/g],
 ];
 const PLEASANTRY_FILLER =
@@ -1088,7 +1119,7 @@ const PAY_SPLIT =
 const SMALL_TALK =
   /\b(just\s+(chatting|browsing|bored|checking\s+(in|you\s+out))|favou?rite\s+(fish|discus|strain|colou?r|one)|how\s+are\s+(you|u)|how'?s\s+it\s+going|what'?s\s+up|wassup|lol|lmao|haha+|bored|time\s?pass|who\s+made\s+you|do\s+you\s+like\s+(fish|discus))\b/;
 const FIRST_TIMER =
-  /\b(first[\s-]?time(r)?\s+(buyer|buying|customer|order|ordering|here|purchase|with\s+you)|my\s+first\s+(order|purchase|time)|first\s+order|i'?m\s+(a\s+)?first[\s-]?timer|i'?m\s+new\s+(here|to\s+(this|the\s+den|ordering|buying|your\s+shop))|never\s+(bought|ordered)\s+(from|here|before)|new\s+customer|how\s+does\s+(it|this|the\s+(process|order\w*))\s+work|what\s+(is|'s)\s+the\s+process)\b/;
+  /\b(first[\s-]?time(r)?\s+(buyer|buying|customer|order|ordering|here|purchase|with\s+you)|my\s+first\s+(order|purchase|time)|first\s+order|i'?m\s+(a\s+)?first[\s-]?timer|i'?m\s+new\s+to\s+(ordering|buying)|never\s+(bought|ordered)\s+(from|here|before)|new\s+customer|how\s+does\s+(it|this|the\s+(process|order\w*))\s+work|what\s+(is|'s)\s+the\s+process)\b/;
 /** "Keep the fish longer" asks: only these get the 7-days-free / ₹100-a-day line. */
 const KEEP_LONGER =
   /\b(longer|later|more\s+days|extra\s+days|few\s+(more\s+)?(days|weeks)|until|till|for\s+a\s+(week|while|few)|tank\s+(is\s+)?(not|isn'?t)\s+ready|not\s+ready\s+yet|keep\s+them\s+for|hold\s+(them|it|my\s+fish)\s+for)\b/;

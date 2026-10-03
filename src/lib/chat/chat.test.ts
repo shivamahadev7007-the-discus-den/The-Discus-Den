@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ANSWERS, HUMAN_PUSH_FIRM, OUT_OF_AREA_LEAD, outOfAreaReply, SITE_STEPS, VOLUME_DISCOUNT_LINE } from "./answers.ts";
+import { ANSWERS, firmPushReply, FIRM_CLOSINGS, HUMAN_PUSH_FIRM, OUT_OF_AREA_LEAD, outOfAreaReply, SITE_STEPS, VOLUME_DISCOUNT_LINE } from "./answers.ts";
 import { attachStock, createCatalogLoader, findSiteBundlePath, normName, parseAvailableHtml, parseFoodHtml, parseOwnerName, parseSiteStock, priceCacheMsFromEnv, type CatalogLoader, type FetchLike } from "./catalog.ts";
 import { extractIndianMobile, isReachAsk, matchStrains, parseName, pleasantryOnly, respond, type ChatState } from "./engine.ts";
 import { guardReply } from "./guard.ts";
@@ -2258,9 +2258,12 @@ describe("LB-13: pleasantries get a warm reply, then fish or frozen foods", () =
     assert.equal(out.at(-1)!.reply, ANSWERS.handoffAskPhone("Ravi"));
     assert.equal(out.at(-1)!.state.lead.lookingFor, "Discus frozen foods");
   });
-  it("first-time order questions keep the LB-6 SOP ('I'm new here, how does it work?')", async () => {
-    const r = await one("I'm new here");
-    assert.notEqual(r.intent, "welcome_new");
+  it("explicit first-order questions keep the LB-6 steps + SOP", async () => {
+    for (const m of ["first time ordering, how does it work?", "I'm from Bangalore, first order", "I'm new here, how does it work?"]) {
+      const r = await one(m);
+      assert.equal(r.intent, "first_timer", m);
+      assert.ok(r.reply.startsWith(ANSWERS.ordering), m);
+    }
   });
   it("new replies are warm and brief, no exclamation marks, pass the guard", () => {
     for (const s of [ANSWERS.welcomeGreeting, ANSWERS.welcomeNewHobbyist, ANSWERS.youreWelcome, ANSWERS.bye]) {
@@ -2286,5 +2289,135 @@ describe("LB-13: pleasantries get a warm reply, then fish or frozen foods", () =
     }
     assert.equal(alerts.length, 0);
     assert.equal(store.leads.get(sid), undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Kiara's quick test of 8a88e4e (lb-quick-8a88e4e-2026-10-03.md): every failing case.
+// ---------------------------------------------------------------------------
+describe("Kiara 8a88e4e: LB-14 typo and 'human' misses", () => {
+  const KIARA_MISSES = ["conect me", "cal shiva", "taalk to owner", "I need a human now"];
+  const KIARA_PASSES = [
+    "connect to shiva", "Connect to Shiva", "talk to the owner", "speak to a human", "call shiva", "phone shiva", "contact shiva", "reach the owner",
+    "how can I reach shiva", "put me through to someone", "can I get in touch with the owner", "connect me with someone", "contact owner please",
+    "can i call the owner", "tlak to shiva", "spek to owner", "conect to shivaa", "speek to human", "rech shiva", "contct owner",
+  ];
+  // dropped / doubled / wrong / swapped letters for each verb, + me / Shiva / owner / someone / person / human / manager / him
+  const TYPOS = [
+    "conect me", "connnect to shiva", "conmect to the owner", "cnonect me with him", "conect me to the manager",
+    "cal shiva", "calll the owner", "clal someone", "cal me", "cll shiva",
+    "taalk to owner", "tak to shiva", "tlak to a person", "talkk to a human", "tallk to the manager",
+    "spek to shiva", "speeak to the owner", "spaek to someone", "speek to a human", "sepak to him",
+    "contct shiva", "conntact the owner", "contatc someone", "cantact a person", "contacct the manager",
+    "rech shiva", "reeach the owner", "raech someone", "reah him", "reach a human",
+  ];
+  const HUMAN = ["I need a human now", "need a real person", "want a human", "human please", "any human there?", "is there a human?", "i want a real person", "need a person to talk to", "a real person?"];
+  for (const m of [...KIARA_MISSES, ...KIARA_PASSES, ...TYPOS, ...HUMAN]) {
+    it(`'${m}' -> the first-ask steer`, async () => {
+      const r = await one(m);
+      assert.equal(r.intent, "human_push", m);
+      assert.equal(r.reply, ANSWERS.humanPush);
+      assert.equal(r.state.handoff.active, false);
+    });
+  }
+  const CONTROLS: Array<[string, string | null]> = [
+    ["how do I contact you about a dead fish", "loss_safety_net"],
+    ["can I call to visit the store", "visit"],
+    ["walk to the store", null],
+    ["tall blue diamond", null],
+    ["when will the fish reach me?", null],
+    ["who will contact me?", null],
+    ["can my friend collect the fish for me in Chennai?", null],
+    ["I need a person to collect the fish at the station", null],
+    ["can you teach someone to keep discus?", null],
+    ["is it all for me?", null],
+  ];
+  for (const [m, intent] of CONTROLS) {
+    it(`control: '${m}' is not a push`, async () => {
+      const r = await one(m);
+      if (intent) assert.equal(r.intent, intent, m);
+      else assert.notEqual(r.intent, "human_push", m);
+    });
+  }
+  it("Kiara's mixed LB-15 session: 'I need a human now' is the 4th push, not a fallback", async () => {
+    const out = await chat(["Connect to Shiva", "can I talk to the owner", "please connect me with him", "I need a human now", "just let me speak to Shiva"]);
+    for (const r of out) assert.equal(r.intent, "human_push");
+    assert.equal(out[2]!.reply, ANSWERS.humanPushFirm);
+    assert.equal(out[3]!.reply, firmPushReply(1));
+    assert.equal(out[4]!.reply, firmPushReply(2));
+  });
+});
+
+describe("Kiara 8a88e4e: LB-13 'new here' intros", () => {
+  for (const m of ["im new here", "I'm new here", "I'm new here too", "new here, hi", "new to this hobby", "new to discus", "hi im new", "new here", "I am new to the hobby"]) {
+    it(`'${m}' -> new-hobbyist welcome + fish-or-food (no SOP, no 'didn't catch')`, async () => {
+      const r = await one(m);
+      assert.equal(r.reply, `${ANSWERS.welcomeNewHobbyist} ${ANSWERS.handoffAskLookingFor}`);
+      assert.doesNotMatch(r.reply, /didn't catch|holding tank|Everything is on our website/);
+      assert.equal(r.state.lead.name, undefined);
+    });
+  }
+  it("'im new here' then 'frozen food' -> /frozen + /pellets pointer", async () => {
+    const [, r] = await chat(["im new here", "frozen food"]);
+    assert.equal(r!.reply, ANSWERS.lookingForFood);
+  });
+});
+
+describe("Kiara 8a88e4e: LB-15 never repeats any earlier reply", () => {
+  it("40 consecutive pushes: every reply unique, no '!', polite, form + Shiva as owner, no handoff", async () => {
+    const base = ["I want to talk to Shiva", "Connect to Shiva", "call me", "conect me", "I need a human now", "put me through", "contact the owner", "taalk to owner"];
+    const msgs = Array.from({ length: 40 }, (_, i) => base[i % base.length]!);
+    const out = await chat(msgs);
+    const replies = out.map((r) => r.reply);
+    assert.equal(new Set(replies).size, replies.length, "all 40 replies unique");
+    for (const r of out.slice(2)) {
+      assert.ok(NO_BANG(r.reply));
+      for (const step of ["thediscusden.com", "Shopping Bag", "Finalize", "Place request"]) assert.ok(r.reply.includes(step), step);
+      assert.match(r.reply, /the owner, Shiva|Shiva, (the|our) owner/i);
+      assert.equal(r.state.handoff.active, false);
+      assert.equal(guardReply(r.reply).text, r.reply);
+      assertClean(r.reply);
+    }
+    assert.equal(out[2]!.reply, ANSWERS.humanPushFirm, "3rd push is Shiva's wording");
+  });
+  it("no push reply equals any earlier bot reply, even with other questions in between", async () => {
+    const msgs: string[] = [];
+    for (let i = 0; i < 15; i++) msgs.push(i % 3 === 0 ? "price of blue diamond" : i % 3 === 1 ? "talk to shiva" : "are you a bot?");
+    const out = await chat(msgs);
+    const seen = new Set<string>();
+    out.forEach((r, i) => {
+      if (msgs[i] !== "price of blue diamond") assert.ok(!seen.has(r.reply), `turn ${i}`);
+      seen.add(r.reply);
+    });
+  });
+  it("the composition never repeats (first 5000 indices unique) and every part passes the guard", () => {
+    const all = Array.from({ length: 5000 }, (_, k) => firmPushReply(k));
+    assert.equal(new Set(all).size, all.length);
+    for (const t of all.slice(0, 1600)) {
+      assert.equal(guardReply(t).text, t);
+      assert.ok(NO_BANG(t));
+      assertClean(t);
+    }
+    assert.equal(firmPushReply(0), ANSWERS.humanPushFirm);
+    assert.ok(FIRM_CLOSINGS.every((c) => /Shiva/.test(c)));
+  });
+});
+
+describe("Kiara 8a88e4e: food asks link /frozen and /pellets, not /in-the-den", () => {
+  for (const m of ["do you sell frozen food?", "bloodworms?", "pellets?", "what food do you have"]) {
+    for (const [label, cat] of [["live", liveCatalog()], ["offline", brokenCatalog()]] as const) {
+      it(`'${m}' (${label} catalog)`, async () => {
+        const r = await one(m, cat);
+        assert.match(r.reply, /thediscusden\.com\/frozen/);
+        assert.match(r.reply, /thediscusden\.com\/pellets/);
+        assert.doesNotMatch(r.reply, /in-the-den/);
+      });
+    }
+  }
+  it("no canned answer points to /in-the-den", () => {
+    for (const [k, v] of Object.entries(ANSWERS)) {
+      const text = typeof v === "function" ? (v as (n?: string) => string)("Ravi") : v;
+      assert.doesNotMatch(text, /in-the-den/, k);
+    }
   });
 });

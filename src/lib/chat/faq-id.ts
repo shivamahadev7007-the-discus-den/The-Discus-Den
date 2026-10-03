@@ -6,7 +6,7 @@
  * than to exact text that includes live prices. Not used at runtime.
  */
 
-import { ANSWERS, HUMAN_PUSH_FIRM, OUT_OF_AREA_LEAD, ownerReply, PER_PIECE_LINE } from "./answers.ts";
+import { ANSWERS, isFirmPushReply, OUT_OF_AREA_LEAD, ownerReply, PER_PIECE_LINE } from "./answers.ts";
 
 const FIXED: Array<[string, string]> = [
   [ANSWERS.lossSafetyNet, "FAQ 26"],
@@ -44,7 +44,6 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.noInternalFigures, "internal"],
   [ANSWERS.humanPush, "LB-6 steer"],
   [ANSWERS.humanPushShort, "LB-6 steer"],
-  ...HUMAN_PUSH_FIRM.map((t): [string, string] => [t, "LB-15 firm"]),
   [ANSWERS.welcomeGreeting, "welcome"],
   [ANSWERS.welcomeNewHobbyist, "welcome-new"],
   [ANSWERS.unlistedFirm, "LB-5 firm"],
@@ -94,6 +93,7 @@ export function faqIdOf(reply: string): string {
     const core = stripOffer(text);
     if (core.length >= 20 && core !== text && first.startsWith(core)) return id;
   }
+  if (isFirmPushReply(first)) return "LB-15 firm";
   if (first.startsWith(OUT_OF_AREA_LEAD)) return "out-of-area";
   if (first.startsWith(ANSWERS.availableIntro)) return "FAQ 1";
   if (first.startsWith(ANSWERS.stockIntro)) return "C1 stock";

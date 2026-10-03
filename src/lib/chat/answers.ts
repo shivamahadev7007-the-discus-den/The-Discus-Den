@@ -147,12 +147,6 @@ export const ANSWERS = {
    */
   humanPushFirm:
     "Understood. Kindly place your requirement on thediscusden.com and fill in the form (Shopping Bag, then Finalize and Place request). All your questions and concerns will be handled by the owner, Shiva, once he is notified. We appreciate your cooperation.",
-  humanPushFirm2:
-    "I understand, and I appreciate your patience. Please add your requirement to the Shopping Bag on thediscusden.com, tap Finalize, fill in the form and tap Place request. Shiva is notified straight away and will personally handle all your questions.",
-  humanPushFirm3:
-    "I hear you. Shiva looks after every customer himself once your request reaches him. Kindly fill in the form on thediscusden.com (Shopping Bag, Finalize, Place request) with your requirement and any questions, and he'll take it from there. Thank you for understanding.",
-  humanPushFirm4:
-    "Thank you for bearing with me. Placing your requirement through the form on thediscusden.com (Shopping Bag, then Finalize and Place request) is how Shiva gets notified, and he will answer all your concerns personally. We appreciate your cooperation.",
   /**
    * LB-6 SOP (Shiva, 3 Oct) for first-timers and orders outside Chennai (not
    * store pickup). Default flow; the 7-days-free / ₹100-a-day line is only for
@@ -201,10 +195,10 @@ export const ANSWERS = {
   quarantineShipYes: "Yes.",
   holdingBeyond: "Anything beyond that is Shiva's call. Shall I pass your details?",
   foodIntro: "We have",
-  foodOutro: "See thediscusden.com/in-the-den.",
+  foodOutro: "See thediscusden.com/frozen and thediscusden.com/pellets.",
   foodFetchFailed:
-    "We have frozen foods and pellets. I can't load the live rates right now. You can see them at thediscusden.com/in-the-den.",
-  goatHeartPending: "Goat Heart Mix rates are coming soon. Keep an eye on thediscusden.com/in-the-den.",
+    "We have frozen foods and pellets. I can't load the live rates right now. You can see them at thediscusden.com/frozen and thediscusden.com/pellets.",
+  goatHeartPending: "Goat Heart Mix rates are coming soon. Keep an eye on thediscusden.com/frozen.",
   reseller: "Thanks. Shiva handles trade enquiries personally. Shall I pass your details to him?",
   sickFish:
     "Sorry to hear that. I can't give health or treatment advice here, but Shiva can talk it through with you personally. Shall I pass your details to him now?",
@@ -280,8 +274,67 @@ export const ANSWERS = {
     "Sorry, I'm having trouble right now. Please try again in a moment, or see thediscusden.com/available.",
 } as const;
 
-/** LB-15: the 3rd-push reply and its rotation (4th push onward). */
-export const HUMAN_PUSH_FIRM: readonly string[] = [ANSWERS.humanPushFirm, ANSWERS.humanPushFirm2, ANSWERS.humanPushFirm3, ANSWERS.humanPushFirm4];
+
+/**
+ * LB-15 (Kiara 8a88e4e, Shiva "never repeat"): firm replies are composed from an
+ * opening, a form sentence (Shopping Bag, Finalize, Place request) and a closing
+ * naming Shiva as the owner. Index k (0 = 3rd push) maps one-to-one onto the
+ * 6 x 6 x 6 = 216 combinations, with the opening changing on every push; past
+ * 216, extra sentences are appended in bijective base 6, so no index ever
+ * repeats a reply. k = 0 is Shiva's own wording.
+ */
+export const FIRM_OPENINGS: readonly string[] = [
+  "Understood.",
+  "I understand, and I appreciate your patience.",
+  "I hear you.",
+  "Thank you for bearing with me.",
+  "Of course, I understand.",
+  "Noted, and thank you for your patience.",
+];
+export const FIRM_FORM: readonly string[] = [
+  "Kindly place your requirement on thediscusden.com and fill in the form (Shopping Bag, then Finalize and Place request).",
+  "Please add your requirement to the Shopping Bag on thediscusden.com, tap Finalize, fill in the form and tap Place request.",
+  "Kindly fill in the form on thediscusden.com with your requirement and any questions: Shopping Bag, Finalize, then Place request.",
+  "The quickest route is the form on thediscusden.com: add your requirement to the Shopping Bag, tap Finalize and then Place request.",
+  "Simply choose what you need on thediscusden.com, open the Shopping Bag, tap Finalize, fill in your details and tap Place request.",
+  "Please place your requirement through the form on thediscusden.com (Shopping Bag, Finalize, Place request) and mention any questions there.",
+];
+export const FIRM_CLOSINGS: readonly string[] = [
+  "All your questions and concerns will be handled by the owner, Shiva, once he is notified. We appreciate your cooperation.",
+  "Shiva, the owner, is notified straight away and will personally handle all your questions.",
+  "Once it reaches him, the owner, Shiva, will take it from there and answer everything himself. Thank you for understanding.",
+  "That is how the owner, Shiva, gets notified, and he will answer all your concerns personally. We appreciate your cooperation.",
+  "The owner, Shiva, looks after every request himself and will get back to you on the details you share. Thank you.",
+  "Shiva, our owner, reviews each request personally and will handle your questions from there. Thank you for your understanding.",
+];
+const FIRM_EXTRAS: readonly string[] = [
+  "Everything you need is on the site.",
+  "There's no payment on the site.",
+  "It only takes a minute.",
+  "Shipping is extra, and you get an estimate after the request.",
+  "Prices are per piece, as shown on each card.",
+  "We're glad you're here.",
+];
+export function firmPushReply(k: number): string {
+  const n = FIRM_OPENINGS.length;
+  const a = k % n;
+  const b = Math.floor(k / n) % n;
+  const c = Math.floor(k / (n * n)) % n;
+  const parts = [FIRM_OPENINGS[a]!, FIRM_FORM[(a + b) % n]!, FIRM_CLOSINGS[(a + b + c) % n]!];
+  // Past 216: bijective base-6 digits of q pick extra sentences (q >= 1 -> a unique, non-empty list).
+  let q = Math.floor(k / (n * n * n));
+  while (q > 0) {
+    q -= 1;
+    parts.push(FIRM_EXTRAS[q % FIRM_EXTRAS.length]!);
+    q = Math.floor(q / FIRM_EXTRAS.length);
+  }
+  return parts.join(" ");
+}
+export const HUMAN_PUSH_FIRM: readonly string[] = [0, 1, 2, 3].map(firmPushReply);
+/** Test / QA support: is this one of the composed LB-15 firm replies? */
+export function isFirmPushReply(text: string): boolean {
+  return FIRM_OPENINGS.some((o) => text.startsWith(`${o} `)) && FIRM_FORM.some((f) => text.includes(f)) && FIRM_CLOSINGS.some((c) => text.includes(c));
+}
 
 /** B12 (3 Oct rule): the owner's name as the site footer shows it. Never a number. */
 export const OWNER_FALLBACK = "Shiva";
