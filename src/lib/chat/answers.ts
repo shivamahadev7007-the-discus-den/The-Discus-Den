@@ -98,16 +98,36 @@ export const ANSWERS = {
     "We can deliver to other states on request. Shiva will confirm the route and timing with you. Shall I pass your details?",
   shipRemote:
     "We'll try our best, but we can't guarantee safe arrival over very long journeys. Shiva will talk it through with you. Shall I pass your details?",
+  /**
+   * LB-6 (Shiva, 3 Oct): how to order = steer to the site. Button and page names
+   * are the live site's own (3 Oct 11:30 IST): "Current Stock" page, quantity on
+   * each card, "Shopping Bag", "Finalize", "Place request"; "No payment here";
+   * "Shipping is extra ... we will send a shipping estimate".
+   */
   ordering:
-    "Pick your fish on thediscusden.com/available and finalise in the cart. There's no payment on the site. Your list goes to Shiva, who follows up with you personally. Shipping is extra and is estimated after you order.",
+    "Everything is on our website and it's self-explanatory. To order: open Current Stock (thediscusden.com/available), choose a quantity on each card, open the Shopping Bag, tap Finalize, add your details and tap Place request. There's no payment on the site. Shipping is extra: after you place the request, we send you a shipping estimate. Once your request is placed, Shiva is notified and takes it from there.",
+  /** LB-6: a push to reach a human / Shiva gets a warm steer to the site, not a handoff. */
+  humanPush:
+    "I understand you'd like to reach Shiva. The quickest way is through our website: everything is on thediscusden.com and it's self-explanatory. To order, open Current Stock (thediscusden.com/available), choose a quantity on a card, open the Shopping Bag, tap Finalize, add your details and tap Place request. There's no payment on the site. Once your request is placed, Shiva is notified and will take it from there.",
+  /** LB-6: repeated pushes get the same steer, shorter. */
+  humanPushShort:
+    "All the details are on thediscusden.com. To order, choose your fish on thediscusden.com/available, then open the Shopping Bag, tap Finalize and Place request. Shiva is notified as soon as your request is placed and will take it from there.",
+  /**
+   * LB-6 SOP (Shiva, 3 Oct) for first-timers and orders outside Chennai (not
+   * store pickup). Default flow; the 7-days-free / ₹100-a-day line is only for
+   * customers who ask us to keep fish longer. Payment method only, never a number.
+   */
+  sopIntro: "If you're outside Chennai or ordering for the first time, here's how it works:",
+  sop:
+    "1. Your fish are moved to a separate customer holding tank.\n2. They're fasted for two days, and you get an update from us every day during this time.\n3. Shipping happens on day three, most likely the coming Saturday or Sunday.\n4. Shipping is by train. We give you a railway agent's contact: you can collect the fish at the station by speaking with the agent, or have them ported from the station to your place.\n5. Payment: half the amount as advance once your fish are moved to the holding tank, and the balance on shipping day, before dispatch.",
   howToPay:
     "There's no payment on the site. Payment is by GPay. Shiva shares the payment details himself when he confirms your order, so please only pay details he gives you directly.",
   paymentDetails:
     "Shiva shares payment details himself when he confirms your order. Please only pay details he gives you directly.",
   shippingCost: "Shipping is extra. Shiva sends an estimate after you place your order.",
   // [PENDING ST-6] minimal draft, no dates or day counts until Shiva locks it.
-  shippingHow:
-    "After you confirm, your fish rest in a holding tank before travel, with updates from Shiva. They go by train through a railway agent, and you collect at the station or have them ported home. Shiva confirms the timing with you.",
+  /** FAQ 9, aligned to the LB-6 SOP: the SOP itself is the answer (see engine). */
+  shippingHow: "Here's how delivery works for orders outside Chennai:",
   doa:
     "If a fish arrives dead, we refund it promptly. Please record a clear unboxing video and send it to Shiva within 24 hours of arrival. Shiva reviews every claim personally.",
   visit:
@@ -199,7 +219,8 @@ export const ANSWERS = {
 /** B12 (3 Oct rule): the owner's name as the site footer shows it. Never a number. */
 export const OWNER_FALLBACK = "Shiva";
 export function ownerReply(owner: string): string {
-  return `The Discus Den is run by ${owner}, here in Chennai, as shown on our website. He reads every handoff personally. Want me to pass your details to him?`;
+  // LB-6: no handoff offer; steer to the site instead.
+  return `The Discus Den is run by ${owner}, here in Chennai, as shown on our website. Everything you need is on thediscusden.com, and once you place a request from the Shopping Bag, ${owner} is notified and takes it from there.`;
 }
 
 /** Lead flags, as named in section 3 of the pack. */

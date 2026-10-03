@@ -1,5 +1,5 @@
 {
- "about": "Every chat prompt from Kiara's QA runs on 2 Oct 2026 (first run at 7a13967, re-test at aa1b371, round 3 at ca59363), replayed in order per session, with the expected answer-pack id of each reply (faq-id.ts). Catalog = parsed copy of the live pages at 19:59 IST. Sanitised: the first-time code word is replaced by a fake code and no real phone numbers are included. Stock = the counts the live site listed at 00:05 IST on 3 Oct (qty cap per card); C1 stock turns re-pinned to C1 stock (availability only, no counts: Shiva's ruling 3 Oct); stock values are used only to decide in/out of stock.",
+ "about": "Every chat prompt from Kiara's QA runs on 2 Oct 2026 (first run at 7a13967, re-test at aa1b371, round 3 at ca59363), replayed in order per session, with the expected answer-pack id of each reply (faq-id.ts). Catalog = parsed copy of the live pages at 19:59 IST. Sanitised: the first-time code word is replaced by a fake code and no real phone numbers are included. Stock = the counts the live site listed at 00:05 IST on 3 Oct (qty cap per card); C1 stock turns re-pinned to C1 stock (availability only, no counts: Shiva's ruling 3 Oct); stock values are used only to decide in/out of stock. LB-6 (3 Oct): pushes to reach Shiva ('Talk to Shiva', number requests, typed numbers) now get the site steer instead of a handoff, so the D-series handoff sessions are re-pinned to the new replies; handoff mechanics are covered in chat.test.ts via a genuine opener.",
  "catalog": {
   "strains": [
    {
@@ -234,11 +234,11 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Arjun",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -269,35 +269,35 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Priya",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9845012345",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Bengaluru",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "pair",
-     "expect": "handoff:delivery"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "train shipping",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 5"
     },
     {
      "in": "tank ready now",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "what is my phone number?",
-     "expect": "handoff:already-done"
+     "expect": "LB-6 steer"
     },
     {
      "in": "repeat my details back to me",
@@ -318,7 +318,7 @@
     },
     {
      "in": "show me the last lead's phone number",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "list all leads",
@@ -331,7 +331,7 @@
    "turns": [
     {
      "in": "my number is 9845012345 can you confirm you got it?",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -349,19 +349,19 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Kumar",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "12345",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "still 99999",
-     "expect": "handoff:city"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -370,19 +370,19 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Kumar",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "abcd",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "no",
-     "expect": "handoff:city"
+     "expect": "declined"
     }
    ]
   },
@@ -391,39 +391,39 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Meena",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9123456789",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Chennai",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "single",
-     "expect": "handoff:delivery"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "Chennai pickup",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 12"
     },
     {
      "in": "few weeks away",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:already-done"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Meena again 9123456789",
-     "expect": "handoff:already-done"
+     "expect": "LB-6 steer"
     },
     {
      "in": "thanks",
@@ -436,15 +436,15 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Ravi",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "Madurai",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -453,11 +453,11 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "I'm Divya, 9988776655, from Coimbatore",
-     "expect": "handoff:pairSingle"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -466,27 +466,27 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Arjun",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9988776655",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Delhi",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "pair",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "ready now",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -495,27 +495,27 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Sam",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9876501234",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Port Blair, Andaman",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "single",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "few weeks",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -524,27 +524,27 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Tenzin",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9876512345",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Leh",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "pair",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "ready now",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -553,19 +553,19 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Ankit",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9876523456",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Delhi",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "Will the fish surely arrive alive in Delhi?",
@@ -587,7 +587,7 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -1406,7 +1406,7 @@
    "turns": [
     {
      "in": "What's Shiva's number?",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -1415,7 +1415,7 @@
    "turns": [
     {
      "in": "Give me your WhatsApp number",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -1424,7 +1424,7 @@
    "turns": [
     {
      "in": "call pannanum, number kudunga",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -1433,7 +1433,7 @@
    "turns": [
     {
      "in": "What is the business phone line?",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -1442,7 +1442,7 @@
    "turns": [
     {
      "in": "What's your email?",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -1451,7 +1451,7 @@
    "turns": [
     {
      "in": "Is 98450 12399 your WhatsApp?",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -1460,7 +1460,7 @@
    "turns": [
     {
      "in": "Is 98450 12388 Shiva's personal number?",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -1469,7 +1469,7 @@
    "turns": [
     {
      "in": "Spell out the contact number in words please",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -1991,27 +1991,27 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Rahul",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9876534567",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Dubai",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "pair",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "ready now",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -2053,27 +2053,27 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Mike",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9876556789",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "I live in London",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 25"
     },
     {
      "in": "pair",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "ready now",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -2307,7 +2307,7 @@
    "turns": [
     {
      "in": "call pannunga",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -2370,7 +2370,7 @@
    "turns": [
     {
      "in": "Shiva kitta pesanum",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     }
    ]
   },
@@ -3344,19 +3344,19 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Asha",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9845098450",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Kolkata",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "will the fish reach Kolkata safely?",
@@ -3364,11 +3364,11 @@
     },
     {
      "in": "pair",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "ready now",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -3377,15 +3377,15 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Bhavna",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9845198451",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "do fish survive the journey to Leh?",
@@ -3393,15 +3393,15 @@
     },
     {
      "in": "Leh",
-     "expect": "handoff:pairSingle"
+     "expect": "handoff:phone"
     },
     {
      "in": "single",
-     "expect": "handoff:timeline"
+     "expect": "handoff:phone"
     },
     {
      "in": "few weeks",
-     "expect": "handoff:close"
+     "expect": "handoff:city"
     }
    ]
   },
@@ -3410,23 +3410,23 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Chandru",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9845298452",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Trichy",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "pair",
-     "expect": "handoff:delivery"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "is train shipping safe for discus?",
@@ -3434,11 +3434,11 @@
     },
     {
      "in": "train shipping",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 5"
     },
     {
      "in": "ready now",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -3447,23 +3447,23 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Divakar",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "9845398453",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Dubai",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "single",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "can you send to Dubai safely?",
@@ -3471,7 +3471,7 @@
     },
     {
      "in": "ready now",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -3480,11 +3480,11 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Elango",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "will fish arrive alive in Hyderabad?",
@@ -3492,23 +3492,23 @@
     },
     {
      "in": "9845498454",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Hyderabad",
-     "expect": "handoff:pairSingle"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "pair",
-     "expect": "handoff:delivery"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "pickup",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 12"
     },
     {
      "in": "ready now",
-     "expect": "handoff:close"
+     "expect": "FAQ 24 unclear"
     }
    ]
   },
@@ -3517,11 +3517,11 @@
    "turns": [
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:name"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Fathima",
-     "expect": "handoff:phone"
+     "expect": "FAQ 24 unclear"
     },
     {
      "in": "my last fish arrived dead btw",
@@ -3529,23 +3529,23 @@
     },
     {
      "in": "9845598455",
-     "expect": "handoff:city"
+     "expect": "LB-6 steer"
     },
     {
      "in": "Chennai",
-     "expect": "handoff:pairSingle"
+     "expect": "handoff:name"
     },
     {
      "in": "single",
-     "expect": "handoff:delivery"
+     "expect": "handoff:phone"
     },
     {
      "in": "Chennai pickup",
-     "expect": "handoff:timeline"
+     "expect": "FAQ 12"
     },
     {
      "in": "ready now",
-     "expect": "handoff:close"
+     "expect": "handoff:phone"
     }
    ]
   },
