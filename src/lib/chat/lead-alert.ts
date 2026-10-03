@@ -1,6 +1,6 @@
 /**
- * Lead alert for Shiva: fired once per session when a handoff completes
- * (name + valid number captured).
+ * Lead alert for Shiva: fired once per session as soon as the lead is
+ * actionable (name + valid number captured, or the handoff completes).
  *
  * Channel is chosen by CHAT_LEAD_ALERT_MODE:
  *   unset / "off"  -> log a one-line note only (default; lead is still in the DB)
@@ -255,6 +255,14 @@ export async function sendLeadAlert(
       console.warn(`[chat] lead alert failed: Resend HTTP ${res.status} ${detail}`);
       return { sent: false, channel: "email", error: `http ${res.status}` };
     }
+    // LB-7: positive evidence in the runtime log (no lead details, no key).
+    let id: string | undefined;
+    try {
+      id = (await res.text()).match(/"id"\s*:\s*"([^"]{1,80})"/)?.[1];
+    } catch {
+      id = undefined;
+    }
+    console.log(`[chat] lead alert sent: email via Resend${id ? ` id=${id}` : ""}`);
     return { sent: true, channel: "email" };
   } catch (err) {
     const msg = ctrl.signal.aborted ? "timeout" : err instanceof Error ? err.message : String(err);

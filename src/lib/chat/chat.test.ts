@@ -666,7 +666,8 @@ describe("HTTP /api/chat", () => {
     }
     assert.equal(alerts.length, 1);
     assert.equal(alerts[0]!.lead.state.lead.phone, "+919845012345");
-    assert.ok(alerts[0]!.transcript.length >= 14);
+    // LB-7: sent on the turn the number is captured (3 visitor + 3 bot lines so far).
+    assert.equal(alerts[0]!.transcript.length, 6);
     assert.equal(store.leads.get(SID)!.completed, true);
     assert.equal(replies[8], ANSWERS.humanPush, "LB-6: a push after a completed handoff gets the site steer");
     for (const r of replies) assert.doesNotMatch(r, /9845012345|98450/);

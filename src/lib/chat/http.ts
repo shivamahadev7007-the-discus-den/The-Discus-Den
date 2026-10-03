@@ -221,8 +221,13 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
           deps.store.upsertLead(sid, source, result.state),
         ]);
 
-        // --- Lead alert: once per session, only on a completed handoff, then flood control ---
-        if (result.completedNow && (await deps.store.claimLeadAlert(sid))) {
+        // --- Lead alert: once per session, then flood control ---
+        // LB-7: fire as soon as the lead is actionable (name + valid number captured), not
+        // only after the last handoff question; visitors often stop replying after the number.
+        const hasContact = (s: { lead?: { name?: string; phone?: string } } | null | undefined) =>
+          Boolean(s?.lead?.name && s?.lead?.phone);
+        const contactReadyNow = hasContact(result.state) && !hasContact(prev);
+        if ((result.completedNow || contactReadyNow) && (await deps.store.claimLeadAlert(sid))) {
           const status = await deps.store.decideLeadAlert({
             sessionId: sid,
             phone: result.state.lead.phone ?? null,
@@ -238,9 +243,14 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
             const task = (async () => {
               try {
                 const transcript = await deps.store.transcript(sid);
-                await send({ sessionId: sid, source, state: result.state }, transcript);
+                const out = await send({ sessionId: sid, source, state: result.state }, transcript);
+                if (out && out.sent === false) {
+                  // LB-7: only alerts that really went out count toward the caps.
+                  await deps.store.recordAlertOutcome(sid, out.channel === "off" ? "not_sent_off" : "failed");
+                }
               } catch (err) {
                 console.warn("[chat] lead alert failed (soft)", err instanceof Error ? err.message : err);
+                await deps.store.recordAlertOutcome(sid, "failed").catch(() => undefined);
               }
             })();
             // Don't hold the customer's reply for the email: hand it to waitUntil when the
