@@ -177,6 +177,16 @@ export const ANSWERS = {
   // [PENDING ST-6] minimal draft, no dates or day counts until Shiva locks it.
   /** FAQ 9, aligned to the LB-6 SOP: the SOP itself is the answer (see engine). */
   shippingHow: "Here's how delivery works for orders outside Chennai:",
+  /**
+   * LB-18 (Shiva, 3 Oct): "when will the fish reach me?" -> timing depends on the
+   * place and the train route (no hour or day counts: the site gives none), then
+   * the LB-6 SOP (sopIntro + sop, reused), then Chennai pickup as the alternative.
+   */
+  deliveryTiming: "Delivery time depends on your location and the train route to your city.",
+  deliveryTimingPickup: "If you're in Chennai or can come over, store pickup is also possible by arrangement.",
+  /** LB-18: a Chennai customer leads with store pickup. */
+  deliveryTimingChennai:
+    "In Chennai, the simplest option is store pickup by arrangement: once your request is placed, Shiva shares the location and sets a time with you. Delivery to other cities goes by train, and the timing depends on the route.",
   doa:
     "If a fish arrives dead, we refund it promptly. Please record a clear unboxing video and send it to Shiva within 24 hours of arrival. Shiva reviews every claim personally.",
   visit:
@@ -334,6 +344,11 @@ export const HUMAN_PUSH_FIRM: readonly string[] = [0, 1, 2, 3].map(firmPushReply
 /** Test / QA support: is this one of the composed LB-15 firm replies? */
 export function isFirmPushReply(text: string): boolean {
   return FIRM_OPENINGS.some((o) => text.startsWith(`${o} `)) && FIRM_FORM.some((f) => text.includes(f)) && FIRM_CLOSINGS.some((c) => text.includes(c));
+}
+
+/** LB-18: delivery timing for a named place inside the 8 train states (never a day count). */
+export function deliveryTimingFor(place: string): string {
+  return `Delivery time to ${place} depends on the train route from Chennai.`;
 }
 
 /** B12 (3 Oct rule): the owner's name as the site footer shows it. Never a number. */

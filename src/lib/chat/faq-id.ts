@@ -18,6 +18,8 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.unsure, "last-resort"],
   [ANSWERS.doa, "FAQ 10"],
   [ANSWERS.shipInStates, "FAQ 5"],
+  [ANSWERS.deliveryTiming, "LB-18 timing"],
+  [ANSWERS.deliveryTimingChennai, "LB-18 timing"],
   [ANSWERS.discount, "FAQ 19"],
   [ANSWERS.paymentDetails, "Rule 5a"],
   [ANSWERS.howToPay, "FAQ 7"],
@@ -94,6 +96,7 @@ export function faqIdOf(reply: string): string {
     if (core.length >= 20 && core !== text && first.startsWith(core)) return id;
   }
   if (isFirmPushReply(first)) return "LB-15 firm";
+  if (/^Delivery time to [^.]+ depends on the train route from Chennai\./.test(first)) return "LB-18 timing";
   if (first.startsWith(OUT_OF_AREA_LEAD)) return "out-of-area";
   if (first.startsWith(ANSWERS.availableIntro)) return "FAQ 1";
   if (first.startsWith(ANSWERS.stockIntro)) return "C1 stock";

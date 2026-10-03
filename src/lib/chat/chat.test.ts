@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ANSWERS, firmPushReply, FIRM_CLOSINGS, HUMAN_PUSH_FIRM, OUT_OF_AREA_LEAD, outOfAreaReply, SITE_STEPS, VOLUME_DISCOUNT_LINE } from "./answers.ts";
+import { ANSWERS, deliveryTimingFor, firmPushReply, FIRM_CLOSINGS, HUMAN_PUSH_FIRM, OUT_OF_AREA_LEAD, outOfAreaReply, SITE_STEPS, VOLUME_DISCOUNT_LINE } from "./answers.ts";
 import { attachStock, createCatalogLoader, findSiteBundlePath, normName, parseAvailableHtml, parseFoodHtml, parseOwnerName, parseSiteStock, priceCacheMsFromEnv, type CatalogLoader, type FetchLike } from "./catalog.ts";
 import { extractIndianMobile, isReachAsk, matchStrains, parseName, pleasantryOnly, respond, type ChatState } from "./engine.ts";
 import { guardReply } from "./guard.ts";
@@ -2419,5 +2419,102 @@ describe("Kiara 8a88e4e: food asks link /frozen and /pellets, not /in-the-den", 
       const text = typeof v === "function" ? (v as (n?: string) => string)("Ravi") : v;
       assert.doesNotMatch(text, /in-the-den/, k);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LB-18 (Shiva, 3 Oct): delivery-timing asks -> depends on location + train route,
+// then the LB-6 SOP (reused), then Chennai pickup. Never a day/hour count.
+// ---------------------------------------------------------------------------
+describe("LB-18: delivery timing", () => {
+  const GENERAL = `${ANSWERS.deliveryTiming}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`;
+  const PHRASES = [
+    // English
+    "When will the fish reach me?", "how long does delivery take?", "when will I get my fish?", "delivery time?", "what is the delivery time?",
+    "when will it arrive?", "when do I receive the fish?", "how soon can I get them?", "how many days for delivery?", "estimated delivery?",
+    "ETA?", "how fast is shipping?", "how long does shipping take?", "by when will the fish reach?", "how long will the fish be on the train?",
+    "shipping time please", "what's the transit time?",
+    // Tanglish
+    "eppo varum?", "fish eppo varum", "delivery eppo?", "evlo naal aagum?", "ethana naal la varum?", "eppo kedaikkum?", "meen eppo vandhu serum?",
+    // Hinglish
+    "kab tak milega?", "kitne din mein aayega?", "kab aayega?", "kab milega fish?", "delivery kab hogi?", "fish kab pahunchegi?",
+  ];
+  it(`${PHRASES.length} phrasings`, () => assert.ok(PHRASES.length >= 25));
+  for (const p of PHRASES) {
+    it(`'${p}' -> timing + SOP + Chennai pickup`, async () => {
+      const r = await one(p);
+      assert.equal(r.intent, "delivery_timing", p);
+      assert.equal(r.reply, GENERAL);
+      assert.equal(r.state.handoff.active, false);
+      assert.equal(r.state.pendingOffer, null);
+    });
+  }
+  const IN_STATES: Array<[string, string]> = [
+    ["how many days to reach Bangalore?", "Bangalore"], ["how many days to Bangalore?", "Bangalore"], ["how long will it take to reach Kochi?", "Kochi"],
+    ["how long for delivery to Hyderabad?", "Hyderabad"], ["how long to Mumbai by train?", "Mumbai"], ["when will it reach Madurai?", "Madurai"],
+    ["how long does it take to Pune?", "Pune"], ["Coimbatore ku eppo varum?", "Coimbatore"], ["Bhubaneswar tak kitne din?", "Bhubaneswar"],
+  ];
+  for (const [p, place] of IN_STATES) {
+    it(`in the 8 states: '${p}' names ${place}`, async () => {
+      const r = await one(p);
+      assert.equal(r.intent, "delivery_timing_place", p);
+      assert.equal(r.reply, `${deliveryTimingFor(place)}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`);
+    });
+  }
+  it("a state name only ('how many days does delivery take to Kerala?') -> the general timing line + SOP", async () => {
+    const r = await one("How many days does delivery take to Kerala?");
+    assert.equal(r.reply, GENERAL);
+  });
+  for (const p of ["delivery time to Chennai?", "when will it reach me in Chennai?", "how long to get fish in Chennai?"]) {
+    it(`Chennai: '${p}' leads with store pickup`, async () => {
+      const r = await one(p);
+      assert.equal(r.intent, "delivery_timing_chennai", p);
+      assert.equal(r.reply, ANSWERS.deliveryTimingChennai);
+    });
+  }
+  for (const [p, place, abroad] of [["when will it reach Kolkata?", "Kolkata", false], ["how many days to Delhi?", "Delhi", false], ["when will it reach Dubai?", "Dubai", true]] as const) {
+    it(`outside the 8 states: '${p}' -> LB-6 care-first handoff (no refusal wording)`, async () => {
+      const r = await one(p);
+      assert.equal(r.reply, outOfAreaReply(place, abroad));
+      assert.equal(r.state.pendingOffer, "handoff");
+      assert.ok(!guardReply(r.reply).blocked.length);
+    });
+  }
+  it("timing replies never promise hours or days of travel, and pass the guard", async () => {
+    for (const p of [...PHRASES, ...IN_STATES.map(([q]) => q), "delivery time to Chennai?"]) {
+      const r = await one(p);
+      assert.doesNotMatch(r.reply.replace(SOP_BLOCK, ""), /\b\d+\s*(hours?|hrs?|days?)\b|\b(one|two|three|same|next)[\s-]+(day|days|hours?)\b|overnight/i, p);
+      assert.equal(guardReply(r.reply).text, r.reply);
+      assertClean(r.reply);
+    }
+  });
+  const CONTROLS: Array<[string, string]> = [
+    ["when will it ship?", "ship_how"], ["when do you ship?", "ship_how"], ["when will you dispatch?", "ship_how"], ["how do you ship?", "ship_how"],
+    ["how will I know you got my order?", "order_received"], ["when will shiva contact me?", "order_received"], ["when will I hear from shiva?", "order_received"],
+    ["how long can you hold my fish?", "holding"], ["how many days do you quarantine?", "quarantine"],
+    ["call me", "human_push"], ["Connect to Shiva", "human_push"], ["when can I talk to shiva?", "human_push"], ["conect me", "human_push"],
+    ["my fish arrived dead", "loss_safety_net"],
+  ];
+  for (const [p, intent] of CONTROLS) {
+    it(`control: '${p}' -> ${intent}`, async () => assert.equal((await one(p)).intent, intent, p));
+  }
+  for (const p of ["how long to acclimate the fish?", "how long do discus live?", "when will blue diamond arrive in stock?"]) {
+    it(`control: '${p}' is not a timing ask`, async () => assert.ok(!(await one(p)).intent.startsWith("delivery_timing"), p));
+  }
+  it("over HTTP: timing asks store no lead and send no alert", async () => {
+    const store = createMemoryChatStore();
+    const alerts: LeadForAlert[] = [];
+    const deps = { store, catalog: liveCatalog(), sendAlert: async (lead: LeadForAlert) => { alerts.push(lead); return { sent: true, channel: "console" as const }; } };
+    const sid = "3f2b8c1e-9a4d-4e2f-8b6a-00000000b181";
+    for (const message of ["When will the fish reach me?", "how many days to Bangalore?", "delivery time to Chennai?", "eppo varum?", "kab tak milega?"]) {
+      assert.equal((await handleChatRequest(post({ sessionId: sid, message, source: "site" }), deps)).status, 200);
+    }
+    assert.equal(alerts.length, 0);
+    assert.ok(!store.leads.get(sid)?.completed);
+  });
+  it("inside a handoff, a timing question is answered and the same field is asked again", async () => {
+    const t = await viaHandoff(["Ravi", "fish", "9845012345", "Chennai", "when will the fish reach me?"]);
+    assert.ok(t.at(-1)!.reply.endsWith(ANSWERS.handoffAskDelivery));
+    assert.ok(t.at(-1)!.reply.startsWith(ANSWERS.deliveryTiming));
   });
 });

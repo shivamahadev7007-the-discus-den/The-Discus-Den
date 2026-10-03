@@ -14,6 +14,7 @@
 import {
   ANSWERS,
   firmPushReply,
+  deliveryTimingFor,
   OWNER_FALLBACK,
   outOfAreaReply,
   ownerReply,
@@ -1109,7 +1110,7 @@ const ORDER_IN_CHAT =
   /\b(order|buy|book|purchase|reserve)\s+(it\s+|them\s+|fish\s+)?(on|in|through|via|over|using|from)\s+(the\s+|this\s+)?(chat|chatbot|bot|whatsapp|here)\b|\b(can|could|may|do)\s+(i|we)\s+(just\s+)?(order|buy|book|purchase)\s+(here|right\s+here|now\s+here|from\s+you\s+here)\b|\b(can|could|will)\s+(you|u)\s+(take|book|place|note)\s+(my|the|an|our)\s+order\b|\b(take|book|place)\s+(my|the|an)\s+order\s+(here|on\s+chat|in\s+chat|via\s+chat)\b|\bchat\s+(itself|la\s+order|mein\s+order)\b|\bchat\s+(la|le|mein|me)\s+(order|book)\w*/;
 /** LB-6 B6: "how will I know you got my order?" -> Place request notifies Shiva, who contacts you. */
 const ORDER_RECEIVED =
-  /\bhow\s+(will|would|do|can|shall)\s+i\s+know\b[^?.]*\b(order|request|got\s+it|received|placed|went\s+through)\b|\b(did|have|has)\s+(you|u|shiva|the\s+den)\s+(get|got|receive|received|seen?)\s+(my|our|the)\s+(order|request)\b|\b(will|do)\s+(i|we)\s+get\s+(a\s+|any\s+)?(confirmation|notification|reply|call\s+back|message)\b|\bwhat\s+happens\s+(after|once|when)\s+(i\s+)?(place|order|placing|tap|submit)\w*|\b(order|request)\s+(confirmation|status|received)\b|\b(is|was)\s+my\s+(order|request)\s+(received|placed|confirmed|through)\b|\bwho\s+(will\s+)?(contact|call|reply\s+to)\s+me\b/;
+  /\bhow\s+(will|would|do|can|shall)\s+i\s+know\b[^?.]*\b(order|request|got\s+it|received|placed|went\s+through)\b|\b(did|have|has)\s+(you|u|shiva|the\s+den)\s+(get|got|receive|received|seen?)\s+(my|our|the)\s+(order|request)\b|\b(will|do)\s+(i|we)\s+get\s+(a\s+|any\s+)?(confirmation|notification|reply|call\s+back|message)\b|\bwhat\s+happens\s+(after|once|when)\s+(i\s+)?(place|order|placing|tap|submit)\w*|\b(order|request)\s+(confirmation|status|received)\b|\b(is|was)\s+my\s+(order|request)\s+(received|placed|confirmed|through)\b|\bwho\s+(will\s+)?(contact|call|reply\s+to)\s+me\b|\bwhen\s+(will|would|does|do)\s+(shiva|he|you|someone|the\s+den)\s+(contact|call|reply\s+to|message|get\s+back\s+to)\s+(me|us)\b|\bwhen\s+(will|do)\s+i\s+hear\s+(from|back)\b/;
 /** LB-6 C7: collecting at the railway station is SOP step 4, not Chennai store pickup. */
 const STATION = /\b(railway|station|platform|rail\s+agent|train\s+agent|porter|ported)\b/;
 /** LB-6 C5: full amount / advance questions -> the SOP payment step. */
@@ -1142,6 +1143,41 @@ function outOfArea(state: ChatState, place: Place): string {
     state.lead.inShipStates = false;
   }
   return outOfAreaReply(name, place.zone === "abroad");
+}
+
+/**
+ * LB-18 (Shiva, 3 Oct): delivery-timing asks ("when will the fish reach me?", "how many
+ * days to Bangalore?", "eppo varum?", "kab tak milega?"). Not "when will it ship?" (C4,
+ * dispatch day) and not hold / quarantine-length questions.
+ */
+const DELIVERY_TIMING = new RegExp(
+  [
+    String.raw`\b(when|by\s+when|how\s+soon|how\s+long|how\s+many\s+(days|hours)|how\s+fast|what\s+day|which\s+day)\b[^?.!]*\b(reach|reaches|reached|arrive|arrives|arrival|delivered|receive|get\s+(my|the|them|it|those|these)\b|come\s+to\s+me|take\s+to\s+(reach|arrive|come|get)|delivery\s+take|shipping\s+take|transit|journey|by\s+train|on\s+the\s+train)`,
+    String.raw`\b(how\s+many\s+days|how\s+long|how\s+soon|how\s+fast)\s+(for|is|does|will)?\s*(the\s+)?(delivery|shipping|transit)\b`,
+    String.raw`\b(delivery|shipping|transit|arrival|travel)\s+(time|timing|timings|duration|date|days|period|eta)\b|\bestimated\s+(delivery|arrival)\b|\beta\b|\bhow\s+fast\s+is\s+(the\s+)?(shipping|delivery)\b`,
+    // Tanglish: eppo varum / epo kedaikkum / evlo naal aagum / ethana naal la varum
+    String.raw`\b(eppo|eppa|epo|yeppo|eppodhu|eppothu)\b[^?.!]*\b(varum|varuma|varumaa|kedaikkum|kidaikkum|kedaikum|serum|reach|delivery|vandhu\s+serum)\b|\b(varum|kedaikkum|kidaikkum|serum)\s+(eppo|epo|eppa)\b|\b(evlo|evvalavu|evlavu|evalo|ethana|ethanai|ethanai)\s+(naal|nal|naalu|days|day)\b|\bdelivery\s+(eppo|epo)\b`,
+    // Hinglish: kab tak milega / kitne din mein aayega / delivery kab hogi
+    String.raw`\bkab\s+(tak\s+)?(milega|milegi|milenge|aayega|aayegi|aaega|ayega|aayenge|pahunchega|pahunchegi|pahuchega|aa\s+jayega|aa\s+jaega|deliver)\b|\b(milega|milegi|aayega|ayega|pahunchega)\s+kab\b|\b(kitne|kitna|ketne)\s+(din|dino|time|samay|ghante)\b|\bdelivery\s+kab\b`,
+  ].join("|"),
+);
+/** "how many days to Bangalore?" / "how long to Mumbai by train?" (only with a known place). */
+const TIMING_TO_PLACE = /\bhow\s+(long|many\s+days|many\s+hours)\s+(does\s+it\s+take\s+)?(to|for|till|until)\s+/;
+const NOT_TIMING = /\b(hold|holding|keep\s+(them|my\s+fish|the\s+fish)|quarantin\w*|fast(ed|ing)?\s+(them|the\s+fish|for)|grow|live|lifespan|refund|claim)\b|\bwhen\s+(will|do|would|does)\s+(you|it|they|the\s+fish)\s+(ship|dispatch|send)\b(?![^?.!]*\b(reach|arrive|get\s+to)\b)/;
+
+function deliveryTimingAnswer(state: ChatState, t: string): Turn {
+  state.pendingOffer = null;
+  const place = findPlace(t);
+  if (place && CHENNAI.test(place.name)) {
+    state.lead.stateName ??= place.state;
+    return { reply: ANSWERS.deliveryTimingChennai, intent: "delivery_timing_chennai" };
+  }
+  if (place && place.zone !== "in") return shippingAnswer(state, t); // LB-6 care-first handoff (never a refusal)
+  if (place) state.lead.stateName ??= place.state;
+  const lead = place && !/^(tamil nadu|tamilnadu|kerala|karnataka|andhra pradesh|telangana|maharashtra|madhya pradesh|odisha|orissa)$/.test(place.name)
+    ? deliveryTimingFor(titleCase(place.name))
+    : ANSWERS.deliveryTiming;
+  return { reply: join(lead, SOP_BLOCK, ANSWERS.deliveryTimingPickup), intent: place ? "delivery_timing_place" : "delivery_timing" };
 }
 
 function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean } = {}): Turn {
@@ -1492,7 +1528,8 @@ export const INTENT_RULES: readonly IntentRule[] = [
     id: "talk_to_shiva", tier: "safety", faq: "LB-6: steer to site",
     // LB-14: plus connect / reach / contact / "put me through" / "get me the owner" (typos too).
     // "can I call to visit the store" (no person named) stays on the visit answer.
-    test: (m) => (RE.talkToShiva.test(m.t) || HUMAN_PUSH.test(m.t) || isReachAsk(m.t)) && !(RE.visit.test(m.t) && !PERSON_WORD.test(m.t)),
+    // LB-18: "when will Shiva contact me?" (after ordering) is B6, not a push.
+    test: (m) => (RE.talkToShiva.test(m.t) || HUMAN_PUSH.test(m.t) || isReachAsk(m.t)) && !(RE.visit.test(m.t) && !PERSON_WORD.test(m.t)) && !ORDER_RECEIVED.test(m.t),
     run: ({ state }) => {
       state.pendingOffer = null;
       // LB-15: 3rd push onward gets the polite "place your requirement" reply, rotated.
@@ -1547,6 +1584,12 @@ export const INTENT_RULES: readonly IntentRule[] = [
     id: "order_received", tier: "faq", faq: "LB-6: request placed",
     test: (m) => ORDER_RECEIVED.test(m.t),
     run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.orderReceived, intent: "order_received" }; },
+  },
+  {
+    // LB-18: "when will the fish reach me?" -> depends on place + train route, then the SOP + Chennai pickup.
+    id: "delivery_timing", tier: "faq", faq: "LB-18: delivery timing",
+    test: (m) => (DELIVERY_TIMING.test(m.t) || (TIMING_TO_PLACE.test(m.t) && findPlace(m.t) !== null)) && !NOT_TIMING.test(m.t),
+    run: ({ state, t }) => deliveryTimingAnswer(state, t),
   },
   {
     // LB-6 C5: "full amount first?" -> half advance at the holding tank, balance on shipping day.

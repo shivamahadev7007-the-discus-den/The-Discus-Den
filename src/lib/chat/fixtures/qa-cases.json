@@ -1,5 +1,5 @@
 {
- "about": "Every chat prompt from Kiara's QA runs on 2 Oct 2026 (first run at 7a13967, re-test at aa1b371, round 3 at ca59363), replayed in order per session, with the expected answer-pack id of each reply (faq-id.ts). Catalog = parsed copy of the live pages at 19:59 IST. Sanitised: the first-time code word is replaced by a fake code and no real phone numbers are included. Stock = the counts the live site listed at 00:05 IST on 3 Oct (qty cap per card); C1 stock turns re-pinned to C1 stock (availability only, no counts: Shiva's ruling 3 Oct); stock values are used only to decide in/out of stock. LB-6 (3 Oct): pushes to reach Shiva ('Talk to Shiva', number requests, typed numbers) now get the site steer instead of a handoff, so the D-series handoff sessions are re-pinned to the new replies; handoff mechanics are covered in chat.test.ts via a genuine opener. LB-11 (3 Oct): pair/single answers removed from 3 re-test sessions; 'fish' added after the name where the fish-or-food question is asked. LB-15 (3 Oct): a 3rd push to reach Shiva in a session gets the polite 'place your requirement' reply (LB-15 firm), so 3 turns re-pinned.",
+ "about": "Every chat prompt from Kiara's QA runs on 2 Oct 2026 (first run at 7a13967, re-test at aa1b371, round 3 at ca59363), replayed in order per session, with the expected answer-pack id of each reply (faq-id.ts). Catalog = parsed copy of the live pages at 19:59 IST. Sanitised: the first-time code word is replaced by a fake code and no real phone numbers are included. Stock = the counts the live site listed at 00:05 IST on 3 Oct (qty cap per card); C1 stock turns re-pinned to C1 stock (availability only, no counts: Shiva's ruling 3 Oct); stock values are used only to decide in/out of stock. LB-6 (3 Oct): pushes to reach Shiva ('Talk to Shiva', number requests, typed numbers) now get the site steer instead of a handoff, so the D-series handoff sessions are re-pinned to the new replies; handoff mechanics are covered in chat.test.ts via a genuine opener. LB-11 (3 Oct): pair/single answers removed from 3 re-test sessions; 'fish' added after the name where the fish-or-food question is asked. LB-15 (3 Oct): a 3rd push to reach Shiva in a session gets the polite 'place your requirement' reply (LB-15 firm), so 3 turns re-pinned. LB-18 (3 Oct): delivery-timing asks get the timing + SOP reply, so 1 turn re-pinned to 'LB-18 timing'.",
  "catalog": {
   "strains": [
    {
@@ -2607,7 +2607,7 @@
    "turns": [
     {
      "in": "How many days does delivery take to Kerala?",
-     "expect": "FAQ 5"
+     "expect": "LB-18 timing"
     }
    ]
   },
