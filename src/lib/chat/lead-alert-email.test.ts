@@ -221,7 +221,8 @@ describe("LB-4 · /api/chat sends the email once per completed handoff", () => {
     assert.match(body.subject, /^New chat lead: Ravi — /);
     assert.match(body.text, /Phone\/WhatsApp: \+919845012345/);
     assert.match(body.text, /Visitor: Talk to Shiva/);
-    assert.match(body.text, /Visitor: ready now/);
+    // LB-7: the alert goes out on the turn the number is captured, not after the last question.
+    assert.match(body.text, /Visitor: 9845012345/);
     // Customer never gets their stored details echoed back.
     for (const o of out) assert.doesNotMatch(o.reply, /9845012345/);
   });
