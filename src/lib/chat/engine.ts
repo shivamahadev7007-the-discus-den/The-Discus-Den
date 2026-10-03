@@ -24,7 +24,7 @@ import {
   type LeadFlag,
 } from "./answers.ts";
 import type { CatalogLoader, FoodItem, StrainCard } from "./catalog.ts";
-import { findPlace, type Place } from "./places.ts";
+import { findPlace, findPlaceFuzzy, type Place } from "./places.ts";
 
 // ---------------------------------------------------------------------------
 // State
@@ -1162,7 +1162,16 @@ const DELIVERY_TIMING = new RegExp(
   ].join("|"),
 );
 /** "how many days to Bangalore?" / "how long to Mumbai by train?" (only with a known place). */
-const TIMING_TO_PLACE = /\bhow\s+(long|many\s+days?|many\s+hours)\s+(does\s+it\s+take\s+)?(to|for|till|until)\s+/;
+const TIMING_TO_PLACE = /\bhow\s+(long|many\s+days?|many\s+hours)\s+((does|will)\s+it\s+take\s+)?(to|for|till|until)\s+/;
+/**
+ * LB-18 (Kiara 387ccb5): "how many days to <anything>" is a timing ask even when the place is
+ * unknown or misspelt ("to banglore", "to some small town"), unless what follows "to" is an
+ * action ("how long to acclimate / feed / wait").
+ */
+const TIMING_TO_ACTION =
+  /\bhow\s+(long|many\s+days?|many\s+hours)\s+((does|will)\s+it\s+take\s+)?(to|for|till|until)\s+(acclimat\w*|feed\w*|wait\w*|keep\w*|cycle|cycling|settle|set|setup|change|cook|thaw|defrost|pay|reply|respond|answer|confirm|process|prepare|hold|fast|grow|breed|recover|heal|treat|quarantin\w*|get\s+(a\s+)?(reply|response|answer|confirmation)|hear|see|show|colou?r|eat|adjust|adapt|float|mature|spawn|clean|fill|start|finish|decide|book|order|place)\b/;
+/** "hw mny dayz?" / "how long will it take?" with nothing else. */
+const TIMING_BARE = /^(so\s+|and\s+|ok\s+)?how\s+(many\s+days?|long\s+(will|does)\s+it\s+take)\s*\??$/;
 // LB-18 typos (Kiara 25a82a7): "wen will fish reach me", "delivry time", "hw long shiping",
 // "fish reach when?", "when fish come". Word-order variants on the normalised text.
 const TIMING_ORDER =
@@ -1173,7 +1182,7 @@ const TIMING_SHORT: Record<string, string> = {
   tym: "time", tme: "time", tim: "time", tyme: "time", timee: "time",
   hw: "how", hww: "how", hoow: "how",
   mny: "many", meny: "many", mani: "many", manny: "many", mnay: "many",
-  dys: "days", dayz: "days", dyas: "days", d8s: "days", daays: "days",
+  dys: "days", dayz: "days", dyas: "days", d8s: "days", daays: "days", dais: "days", dayss: "days",
   lng: "long", lnog: "long", lomg: "long", lon: "long", longg: "long",
   dlvry: "delivery", dlvy: "delivery", dlivery: "delivery", delvry: "delivery", dilivery: "delivery", delevery: "delivery", delivry: "delivery",
   shpng: "shipping", shpg: "shipping", shippin: "shipping", shiping: "shipping", shippng: "shipping",
@@ -1215,12 +1224,13 @@ const NOT_TIMING = /\b(back\s+in\s+stock|in\s+stock|restock\w*|come\s+back|avail
 
 function deliveryTimingAnswer(state: ChatState, t: string): Turn {
   state.pendingOffer = null;
-  const place = findPlace(t);
+  // LB-18: a misspelt known city ("banglore", "kolkatta") counts; an unknown place gets the general reply.
+  const place = findPlace(t) ?? findPlaceFuzzy(t);
   if (place && CHENNAI.test(place.name)) {
     state.lead.stateName ??= place.state;
     return { reply: ANSWERS.deliveryTimingChennai, intent: "delivery_timing_chennai" };
   }
-  if (place && place.zone !== "in") return shippingAnswer(state, t); // LB-6 care-first handoff (never a refusal)
+  if (place && place.zone !== "in") return shippingAnswer(state, t, { place }); // LB-6 care-first handoff (never a refusal)
   if (place) state.lead.stateName ??= place.state;
   const lead = place && !/^(tamil nadu|tamilnadu|kerala|karnataka|andhra pradesh|telangana|maharashtra|madhya pradesh|odisha|orissa)$/.test(place.name)
     ? deliveryTimingFor(titleCase(place.name))
@@ -1228,9 +1238,9 @@ function deliveryTimingAnswer(state: ChatState, t: string): Turn {
   return { reply: join(lead, SOP_BLOCK, ANSWERS.deliveryTimingPickup), intent: place ? "delivery_timing_place" : "delivery_timing" };
 }
 
-function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean } = {}): Turn {
+function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean; place?: Place } = {}): Turn {
   const withSop = (opts.sop ?? true) && !CHENNAI.test(t);
-  const place = findPlace(t);
+  const place = opts.place ?? findPlace(t);
   if (place) {
     state.lead.stateName ??= place.state;
     if (place.zone === "in") {
@@ -1639,7 +1649,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
     // LB-18 typos: matched on timingNorm(t) ("wen", "delivry", "hw lng", "tym"...).
     test: (m) => {
       const n = timingNorm(m.t);
-      return (DELIVERY_TIMING.test(n) || TIMING_ORDER.test(n) || (TIMING_TO_PLACE.test(n) && findPlace(m.t) !== null)) && !NOT_TIMING.test(n);
+      return (DELIVERY_TIMING.test(n) || TIMING_ORDER.test(n) || TIMING_BARE.test(n) || (TIMING_TO_PLACE.test(n) && !TIMING_TO_ACTION.test(n))) && !NOT_TIMING.test(n);
     },
     run: ({ state, t }) => deliveryTimingAnswer(state, t),
   },

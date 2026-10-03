@@ -7,6 +7,7 @@ import { guardReply } from "./guard.ts";
 import { ALERT_CAPS, handleChatRequest, handleOptions, RATE_LIMITS } from "./http.ts";
 import { formatLeadAlert, type LeadForAlert, type TranscriptLine } from "./lead-alert.ts";
 import { createMemoryChatStore } from "./store.ts";
+import { findPlaceFuzzy } from "./places.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures: same markup shape as the live server-rendered pages.
@@ -2603,5 +2604,89 @@ describe("Kiara 25a82a7: LB-18 typos and short forms", () => {
     assert.equal(timingNorm("shopping bag"), "shopping bag");
     assert.equal(timingNorm("serum"), "serum");
     assert.equal(timingNorm("teach"), "teach");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Kiara's re-test of 387ccb5 (lb-quick-387ccb5-2026-10-03.md): "how many days to
+// <unknown / misspelt place>" and bare "hw mny dayz" fall back to the timing reply.
+// ---------------------------------------------------------------------------
+describe("Kiara 387ccb5: timing fallback for unknown and misspelt places", () => {
+  const GENERAL = `${ANSWERS.deliveryTiming}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`;
+  const placeReply = (p: string) => `${deliveryTimingFor(p)}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`;
+  const CASES: Array<[string, string]> = [
+    // her failing phrasings, verbatim
+    ["hw mny dayz to banglore", placeReply("Bangalore")],
+    ["how many days to banglore", placeReply("Bangalore")],
+    ["hw mny days to banglore", placeReply("Bangalore")],
+    ["how many days to some small town", GENERAL],
+    ["hw mny dayz", GENERAL],
+    // her Low gap
+    ["shpping tim to hydrabad", placeReply("Hyderabad")],
+    // variants: unknown / gibberish places -> general reply (never the out-of-area handoff)
+    ["how many days to xyzzyq", GENERAL],
+    ["how many days to my village", GENERAL],
+    ["how long to Thiruvarur?", GENERAL],
+    ["hw lng to kumbakonam", GENERAL],
+    ["how many dais to my town", GENERAL],
+    ["how long will it take", GENERAL],
+    ["how many days?", GENERAL],
+    // misspelt known cities -> city line / Chennai pickup
+    ["how many days to chenai", ANSWERS.deliveryTimingChennai],
+    ["how long to kochin", placeReply("Kochi")],
+    ["how many dais to mumbaai", placeReply("Mumbai")],
+    ["how long to thanjavr", placeReply("Thanjavur")],
+    ["how many days for delivery to vizagg", placeReply("Vizag")],
+    ["hw lng to mysor", placeReply("Mysore")],
+    ["delivery time to hydrabad?", placeReply("Hyderabad")],
+    ["how many dys to coimbatur", placeReply("Coimbatore")],
+  ];
+  for (const [m, reply] of CASES) {
+    it(`'${m}'`, async () => {
+      const r = await one(m);
+      assert.equal(r.reply, reply, m);
+      assert.equal(r.state.pendingOffer, null, "no handoff offer for an unknown or in-state place");
+    });
+  }
+  for (const [m, place] of [["when will it reach kolkatta", "Kolkata"], ["how many days to kolkatta?", "Kolkata"], ["how long to guwahatti", "Guwahati"]] as const) {
+    it(`misspelt out-of-area city: '${m}' -> care-first handoff for ${place}`, async () => {
+      const r = await one(m);
+      assert.equal(r.reply, outOfAreaReply(place, false));
+      assert.equal(r.state.pendingOffer, "handoff");
+    });
+  }
+  it("'how many days to bengaluru' names the place as typed (a known alias)", async () => {
+    assert.equal((await one("how many days to bengaluru")).reply, placeReply("Bengaluru"));
+  });
+  const CONTROLS: Array<[string, (i: string) => boolean]> = [
+    ["how many days to acclimate?", (i) => !i.startsWith("delivery_timing")],
+    ["how long to feed them", (i) => !i.startsWith("delivery_timing")],
+    ["how long to wait after ordering?", (i) => !i.startsWith("delivery_timing")],
+    ["how long to get a reply?", (i) => !i.startsWith("delivery_timing")],
+    ["how long to thaw frozen food?", (i) => !i.startsWith("delivery_timing")],
+    ["how many days to hold?", (i) => i === "holding"],
+    ["how long to quarantine?", (i) => i === "quarantine"],
+    ["how many days to pay the balance?", (i) => i === "pay_advance"],
+    ["when fish come back in stock", (i) => !i.startsWith("delivery_timing")],
+    ["when will it ship", (i) => i === "ship_how"],
+    ["when can I come to the store?", (i) => i === "visit"],
+    ["my fish arrived dead", (i) => i === "loss_safety_net"],
+    ["call me", (i) => i === "human_push"],
+    ["Connect to Shiva", (i) => i === "human_push"],
+    ["thanks, can I visit the store?", (i) => i === "visit"],
+  ];
+  for (const [m, ok] of CONTROLS) {
+    it(`control: '${m}'`, async () => {
+      const r = await one(m);
+      assert.ok(ok(r.intent), `${m} -> ${r.intent}`);
+    });
+  }
+  it("findPlaceFuzzy: only after a place word, same first letter, 1-2 letters off; never guesses common words", () => {
+    assert.equal(findPlaceFuzzy("to banglore")?.name, "bangalore");
+    assert.equal(findPlaceFuzzy("to kolkatta")?.name, "kolkata");
+    assert.equal(findPlaceFuzzy("banglore"), null, "no place word in front");
+    assert.equal(findPlaceFuzzy("to thanks"), null);
+    assert.equal(findPlaceFuzzy("to some small town"), null);
+    assert.equal(findPlaceFuzzy("to xyzzyq"), null);
   });
 });
