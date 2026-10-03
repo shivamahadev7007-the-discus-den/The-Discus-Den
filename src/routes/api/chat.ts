@@ -12,7 +12,11 @@ import { createSqlChatStore } from "@/lib/chat/store";
  * Env (Vercel; optional):
  *   CHAT_EXTRA_ORIGINS    comma list of extra allowed origins (previews)
  *   CHAT_IP_SALT          salt for hashing visitor IPs (set a random value)
- *   CHAT_LEAD_ALERT_MODE  "off" (default) | "console"
+ *   CHAT_LEAD_ALERT_MODE  "off" (default, log only) | "console" | "email"
+ *   RESEND_API_KEY        Resend API key (sending access), needed for mode=email
+ *   CHAT_LEAD_ALERT_EMAIL_TO   lead alert recipient (Shiva's inbox), needed for mode=email
+ *   CHAT_LEAD_ALERT_FROM       sender, default "The Discus Den Chat <onboarding@resend.dev>"
+ *   CHAT_LEAD_ALERT_TIMEOUT_MS email send timeout, default 5000
  *   CHAT_PRICE_CACHE_SECONDS   live-price cache TTL, default 60; 0 = always live
  *   CHAT_ALERT_IP_CAP_24H      max sent lead alerts per IP hash per 24 h (default 2)
  *   CHAT_ALERT_GLOBAL_CAP_HOUR max sent lead alerts per hour overall (default 20)

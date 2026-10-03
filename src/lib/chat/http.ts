@@ -48,7 +48,25 @@ export type ChatDeps = {
   env?: Env;
   now?: () => number;
   sendAlert?: (lead: LeadForAlert, transcript: TranscriptLine[]) => Promise<LeadAlertResult>;
+  /** Run work after the response (tests inject this; on Vercel the request context's waitUntil is used). */
+  waitUntil?: (p: Promise<unknown>) => void;
 };
+
+/**
+ * Vercel's Node runtime exposes waitUntil on a global request context (this is
+ * what @vercel/functions reads). Returns undefined anywhere else.
+ */
+export function platformWaitUntil(): ((p: Promise<unknown>) => void) | undefined {
+  try {
+    const ctx = (globalThis as Record<symbol, unknown>)[Symbol.for("@vercel/request-context")] as
+      | { get?: () => { waitUntil?: (p: Promise<unknown>) => void } | undefined }
+      | undefined;
+    const wu = ctx?.get?.()?.waitUntil;
+    return typeof wu === "function" ? wu : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function normOrigin(o: string): string {
   return o.trim().replace(/\/+$/, "").toLowerCase();
@@ -214,11 +232,26 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
           if (status !== "sent") {
             console.warn(`[chat] lead alert ${status} (lead stored in DB)`);
           } else {
-            try {
-              const transcript = await deps.store.transcript(sid);
-              await (deps.sendAlert ?? ((l, t) => sendLeadAlert(l, t, env)))({ sessionId: sid, source, state: result.state }, transcript);
-            } catch (err) {
-              console.warn("[chat] lead alert failed (soft)", err);
+            const send = deps.sendAlert ?? ((l, t) => sendLeadAlert(l, t, env));
+            const task = (async () => {
+              try {
+                const transcript = await deps.store.transcript(sid);
+                await send({ sessionId: sid, source, state: result.state }, transcript);
+              } catch (err) {
+                console.warn("[chat] lead alert failed (soft)", err instanceof Error ? err.message : err);
+              }
+            })();
+            // Don't hold the customer's reply for the email: hand it to waitUntil when the
+            // platform has one; otherwise await (sendLeadAlert has its own 5 s timeout).
+            const waitUntil = deps.waitUntil ?? platformWaitUntil();
+            if (waitUntil) {
+              try {
+                waitUntil(task);
+              } catch {
+                await task;
+              }
+            } else {
+              await task;
             }
           }
         }
