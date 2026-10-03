@@ -42,6 +42,7 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.beginnerIntro, "FAQ 3"],
   [ANSWERS.faqStrains, "FAQ 1"],
   [ANSWERS.noInternalFigures, "internal"],
+  [ANSWERS.unlistedFirm, "LB-5 firm"],
   [ANSWERS.stockFetchFailed, "C1 stock"],
   [ANSWERS.areYouHuman, "are-you-human"],
   [ANSWERS.welcome, "welcome"],

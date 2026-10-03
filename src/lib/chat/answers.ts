@@ -159,6 +159,14 @@ export const ANSWERS = {
   stockListOutro: "Full list: thediscusden.com/available\nWant me to narrow it down by size or colour?",
   stockFetchFailed:
     "I can't load live availability right now. You can check thediscusden.com/available. Or I can pass your question to Shiva.",
+  /**
+   * LB-5 (Shiva, 3 Oct): sizes, ages, cheaper options or anything else not
+   * listed get a warm but firm close. No cards, no prices, no discount line,
+   * no "I'll check", no handoff. [PENDING Anita/Shiva sign-off on wording;
+   * "for sale" from the suggested text dropped: "sale" is a guard shop-word.]
+   */
+  unlistedFirm:
+    "What's listed on thediscusden.com/available is everything we have right now, so we can't offer other sizes, ages or prices. Please pick from that page.",
   /** Rule 1/2/3: no loss figures or sources (not on the site). Not verbatim in the pack. */
   noInternalFigures:
     "I can't share that here. Our available page shows what's ready now: thediscusden.com/available. Want me to narrow it down by size or colour?",
