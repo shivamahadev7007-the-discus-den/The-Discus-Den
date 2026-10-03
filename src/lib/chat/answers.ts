@@ -86,7 +86,15 @@ export const ANSWERS = {
       : "Thanks. What's the best WhatsApp or phone number for Shiva to reach you?",
   handoffPhoneRetry: "A working WhatsApp number, please.",
   handoffAskCity: "Which city are you in?",
-  handoffAskPairSingle: "Are you looking at a pair or single fish?",
+  /** LB-11 (Shiva, 3 Oct): replaces the old pair-or-single question; asked right after the name. */
+  handoffAskLookingFor: "Are you looking for Discus fish or Discus frozen foods?",
+  /** LB-11 pointers after that answer. Pages checked live 3 Oct 12:25 IST: /available, /frozen, /pellets. */
+  lookingForFish:
+    "Great. Everything ready now is on Current Stock (thediscusden.com/available): choose a quantity on a card, then open the Shopping Bag, tap Finalize and Place request.",
+  lookingForFood:
+    "Great. Our frozen foods are on thediscusden.com/frozen and pellets on thediscusden.com/pellets: choose a pack, then open the same Shopping Bag, tap Finalize and Place request.",
+  lookingForBoth:
+    "Great. Fish are on Current Stock (thediscusden.com/available), frozen foods on thediscusden.com/frozen and pellets on thediscusden.com/pellets. Everything goes in the same Shopping Bag: tap Finalize, then Place request.",
   handoffAskDelivery: "Would you prefer train shipping or Chennai pickup?",
   handoffAskTimeline: "Is your tank ready now, or a few weeks away?",
   handoffClose: (name?: string) =>
@@ -113,8 +121,9 @@ export const ANSWERS = {
   beginnerOutro: "Once you place a request from the Shopping Bag, Shiva is notified and can help match fish to your tank too.",
   beginnerNotListed:
     "Our live list is at thediscusden.com/available. Once you place a request from the Shopping Bag, Shiva is notified and can suggest a starter strain from what's ready now.",
-  pairOrSingle:
-    "That depends on your tank and plans. Shiva will advise you personally once you place a request from the Shopping Bag on thediscusden.com.",
+  /** LB-11: "should I buy a pair?" -> per piece, choose the quantity (site steps follow). */
+  howManyToBuy:
+    "That depends on your tank and plans. All prices are per piece, and you choose the quantity on each card. Shiva can advise on your tank once your request is placed.",
   shipInStates:
     "We deliver by train across Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana, Maharashtra, Madhya Pradesh and Odisha. Chennai pickup is also possible.",
   /**

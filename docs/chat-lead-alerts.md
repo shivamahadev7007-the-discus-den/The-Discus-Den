@@ -19,7 +19,7 @@ because visitors often stop replying after the number; those answers stay in the
   `failed` (mode=email but key missing / Resend error / timeout) and `not_sent_off` (mode off) do not
   count toward the one-per-number-per-24 h and per-IP caps (LB-7, migration 0008).
 - Email: subject `New chat lead: <name> — <summary>` (tags such as DOA CLAIM / MORTALITY ASKED / LONG HOLD,
-  strains, place, pair/single); body has name, phone and any email the customer typed, the TDD lead card,
+  strains, place, fish-or-food); body has name, phone and any email the customer typed, the TDD lead card,
   and the full transcript (HTML escaped + plain-text part).
 
 ## Env vars (Vercel, Production)

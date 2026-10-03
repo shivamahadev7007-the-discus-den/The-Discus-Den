@@ -160,7 +160,7 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
           l.city ?? null,
           l.stateName ?? null,
           l.inShipStates ?? null,
-          l.pairSingle ?? null,
+          l.lookingFor ?? null, // LB-11: pair_single column repurposed for fish-or-food (old rows keep pair/single; no migration)
           l.delivery ?? null,
           l.timeline ?? null,
           JSON.stringify(tags),

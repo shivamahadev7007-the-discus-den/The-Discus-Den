@@ -234,11 +234,11 @@ const OPEN = ["Can I visit the store?", "yes"];
 describe("mid-handoff: safety net answers, then re-asks the same step", () => {
   const steps: Array<[string[], string, string]> = [
     [[...OPEN], "my fish died lol", ANSWERS.handoffAskName],
-    [[...OPEN, "Ravi"], "wait, do ur fish die a lot?", ANSWERS.handoffAskPhone("Ravi")],
-    [[...OPEN, "Ravi", "98450 12345"], "last batch fish sethuruchu", ANSWERS.handoffAskCity],
-    [[...OPEN, "Ravi", "98450 12345", "Chennai"], "will a pair survive the trip?", ANSWERS.handoffAskPairSingle],
-    [[...OPEN, "Ravi", "98450 12345", "Chennai", "pair"], "refund kidaikuma if dead?", ANSWERS.handoffAskDelivery],
-    [[...OPEN, "Ravi", "98450 12345", "Chennai", "pair", "pickup"], "my last one died in a week", ANSWERS.handoffAskTimeline],
+    [[...OPEN, "Ravi"], "wait, do ur fish die a lot?", ANSWERS.handoffAskLookingFor],
+    [[...OPEN, "Ravi", "fish"], "last batch fish sethuruchu", ANSWERS.handoffAskPhone("Ravi")],
+    [[...OPEN, "Ravi", "fish", "98450 12345"], "will a pair survive the trip?", ANSWERS.handoffAskCity],
+    [[...OPEN, "Ravi", "fish", "98450 12345", "Chennai"], "refund kidaikuma if dead?", ANSWERS.handoffAskDelivery],
+    [[...OPEN, "Ravi", "fish", "98450 12345", "Chennai", "pickup"], "my last one died in a week", ANSWERS.handoffAskTimeline],
   ];
   for (const [before, msg, reask] of steps) {
     it(`${before.length - 1} steps in: ${msg}`, async () => {

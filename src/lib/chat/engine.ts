@@ -28,8 +28,16 @@ import { findPlace, type Place } from "./places.ts";
 // State
 // ---------------------------------------------------------------------------
 
-export type HandoffStep = "name" | "phone" | "city" | "pairSingle" | "delivery" | "timeline";
-const HANDOFF_ORDER: HandoffStep[] = ["name", "phone", "city", "pairSingle", "delivery", "timeline"];
+/**
+ * LB-11 (Shiva, 3 Oct): "pair or single" is gone. "lookingFor" (Discus fish or
+ * Discus frozen foods) is asked right after the name, so the LB-7 alert, which
+ * fires on the turn the number arrives, already carries it.
+ */
+export type HandoffStep = "name" | "lookingFor" | "phone" | "city" | "delivery" | "timeline";
+const HANDOFF_ORDER: HandoffStep[] = ["name", "lookingFor", "phone", "city", "delivery", "timeline"];
+export const LOOKING_FISH = "Discus fish";
+export const LOOKING_FOOD = "Discus frozen foods";
+export const LOOKING_BOTH = "Discus fish and frozen foods";
 
 export type LeadData = {
   name?: string;
@@ -37,7 +45,8 @@ export type LeadData = {
   city?: string;
   stateName?: string;
   inShipStates?: boolean | null;
-  pairSingle?: string;
+  /** LB-11: "Discus fish" / "Discus frozen foods" / both / free text. */
+  lookingFor?: string;
   delivery?: string;
   timeline?: string;
 };
@@ -61,6 +70,10 @@ export type ChatState = {
     declined: HandoffStep[];
     /** Set after the FAQ 26 reply ("Shall I pass your details to him?"): next message may be yes/no. */
     awaitingConsent?: boolean;
+    /** LB-11: steps that make no sense for this handoff (e.g. fish-or-food on a DOA claim). */
+    skip?: HandoffStep[];
+    /** LB-11: unclear fish-or-food answers re-asked once. */
+    lookingTries?: number;
   };
   lead: LeadData;
   tags: LeadTags;
@@ -70,6 +83,11 @@ export type ChatState = {
   completed: boolean;
   /** LB-6: how many times the visitor pushed to reach a human (steered to the site). */
   humanPushes?: number;
+  /**
+   * LB-11: what the last handoff offer was about, so "yes" sets up the right slots:
+   * "claim" (DOA / sick / mortality: no fish-or-food question), "fish" (already about fish).
+   */
+  handoffKind?: "claim" | "fish";
 };
 
 export function newChatState(): ChatState {
@@ -428,18 +446,38 @@ export function parseName(raw: string): string | null {
   return titleCase(s.toLowerCase());
 }
 
-function parsePairSingle(t: string): string | null {
+const FOOD_WORD = /\b(frozen|foods?|pellets?|heart\s+mix|bloodworms?|blood\s+worms?|feed|saapadu|unavu|khana)\b/;
+const FISH_WORD = /\b(fish|fishes|meen|live\s+discus|discus\s+fish)\b|\bdiscus\b(?!\s+(frozen|foods?|pellets?|feed))/;
+
+/** LB-11: "Are you looking for Discus fish or Discus frozen foods?" */
+function parseLookingFor(t: string): string | null {
+  if (/\b(both|everything|rendum|dono)\b/.test(t)) return LOOKING_BOTH;
+  const food = FOOD_WORD.test(t);
+  const fish = FISH_WORD.test(t.replace(/\bdiscus\s+(frozen\s+)?(foods?|pellets?)\b/g, " "));
+  if (food && fish) return LOOKING_BOTH;
+  if (food) return LOOKING_FOOD;
+  if (fish || /^(the\s+)?(first|former|live)\b|\bfish\s+only\b/.test(t)) return LOOKING_FISH;
+  if (/^(the\s+)?(second|latter)\b/.test(t)) return LOOKING_FOOD;
   if (/\b(not\s+sure|don'?t\s+know|undecided|either|maybe)\b/.test(t)) return "not sure";
-  if (/\b(pair|pairs|two|2\s*(fish|nos|pcs)?|couple)\b/.test(t)) return "pair";
-  if (/\b(single|one|1\s*(fish|no|pc)?|just\s+one)\b/.test(t)) return "single";
-  if (/\b(group|school|several|many|[3-9]|\d{2})\b/.test(t)) return `group (${t.slice(0, 40)})`;
   return null;
 }
+
+/** LB-11: the pointer after the fish-or-food answer (live site pages, 3 Oct 12:25 IST). */
+function lookingForPointer(v: string | undefined): string | undefined {
+  if (v === LOOKING_FISH) return ANSWERS.lookingForFish;
+  if (v === LOOKING_FOOD) return ANSWERS.lookingForFood;
+  if (v === LOOKING_BOTH) return ANSWERS.lookingForBoth;
+  return undefined;
+}
+
+/** LB-9: "I'll visit" / "I will come" / "naan varen" at the delivery step = Chennai pickup. */
+const VISIT_ANSWER =
+  /\b(i'?ll|i\s+will|i\s+can|i\s+shall|we'?ll|we\s+will|will|gonna|going\s+to|planning\s+to)\s+(come|visit|drop\s+by|stop\s+by|walk\s+in|pick\s?-?up|collect)\b|\b(visit|visiting|in\s+person|walk[\s-]?in|self\s+pick\w*|store\s+pickup|come\s+(over|down|personally|to\s+(the|your)\s+(store|shop|place|den))|i'?m\s+coming|coming\s+(over|personally|to\s+(the|your)\s+(store|shop|place|den))|direct(ly)?\s+(come|varen|visit))\b|\b(naan|naane|naa|nan|nanu|naanga)\s+(varen|vaaren|varuven|vandhu\w*|varom|varuvom)\b|\b(varen|vaaren|varuven|neril\s+varen|nerla\s+varen|nera\s+varen|kadaikku\s+varen|vandhu\s+(vaangi|edu|eduth|collect)\w*|main\s+aaunga|aa\s+jaunga|khud\s+aaunga)\b/;
 
 function parseDelivery(t: string): string | null {
   if (/\b(not\s+sure|don'?t\s+know|either|any|both)\b/.test(t)) return "not sure";
   if (/\b(train|rail|railway|ship|shipping|parcel|courier|send)\b/.test(t)) return "train shipping";
-  if (/\b(pick\s?-?up|pickup|collect|come\s+(and\s+)?(take|get)|chennai)\b/.test(t)) return "Chennai pickup";
+  if (/\b(pick\s?-?up|pickup|collect|come\s+(and\s+)?(take|get)|chennai)\b/.test(t) || VISIT_ANSWER.test(t)) return "Chennai pickup";
   return null;
 }
 
@@ -458,8 +496,8 @@ function looksLikeAnswer(step: HandoffStep, raw: string, t: string): boolean {
       return extractIndianMobile(raw) !== null || digitCount(raw) >= 7;
     case "city":
       return findPlace(t) !== null || (!raw.includes("?") && t.split(" ").length <= 4 && /^[\p{L}\s.,'-]+$/u.test(raw.trim()));
-    case "pairSingle":
-      return parsePairSingle(t) !== null;
+    case "lookingFor":
+      return parseLookingFor(t) !== null;
     case "delivery":
       return parseDelivery(t) !== null;
     case "timeline":
@@ -498,8 +536,9 @@ function prefillFromMessage(state: ChatState, raw: string, t: string): void {
       if (place.zone === "remote" || place.zone === "abroad") addFlag(state, "REMOTE");
     }
   }
-  if (!lead.pairSingle && /\b(a\s+pair|pair\s+of|single\s+fish|one\s+fish)\b/.test(t)) {
-    lead.pairSingle = /\bpair\b/.test(t) ? "pair" : "single";
+  // LB-11: an explicit "frozen food" / "discus fish" mention fills the fish-or-food slot.
+  if (!lead.lookingFor && !state.handoff.skip?.includes("lookingFor") && (FOOD_WORD.test(t) || /\b(discus\s+fish|live\s+(fish|discus))\b/.test(t))) {
+    lead.lookingFor = parseLookingFor(t) ?? undefined;
   }
   if (!lead.delivery && /\b(train\s+shipping|by\s+train|chennai\s+pickup|pick\s?up\s+in\s+chennai)\b/.test(t)) {
     lead.delivery = /\btrain\b/.test(t) ? "train shipping" : "Chennai pickup";
@@ -507,10 +546,18 @@ function prefillFromMessage(state: ChatState, raw: string, t: string): void {
   if (!lead.timeline && /\btank\s+(is\s+)?(ready|cycled|set\s+up)\b/.test(t)) lead.timeline = "tank ready now";
 }
 
+/** Steps not to ask on this handoff (declined, skipped for the path, or not relevant). */
+function skipStep(state: ChatState, step: HandoffStep): boolean {
+  if (state.handoff.declined.includes(step) || state.handoff.skip?.includes(step)) return true;
+  if (step === "delivery" && state.lead.inShipStates === false) return true;
+  // LB-11: "is your tank ready?" means nothing to a frozen-food-only buyer.
+  if (step === "timeline" && state.lead.lookingFor === LOOKING_FOOD) return true;
+  return false;
+}
+
 function nextStep(state: ChatState): HandoffStep | null {
   for (const step of HANDOFF_ORDER) {
-    if (state.handoff.declined.includes(step)) continue;
-    if (step === "delivery" && state.lead.inShipStates === false) continue;
+    if (skipStep(state, step)) continue;
     if (!state.lead[step]) return step;
   }
   return null;
@@ -524,8 +571,8 @@ function askFor(step: HandoffStep, state: ChatState): string {
       return ANSWERS.handoffAskPhone(state.lead.name);
     case "city":
       return ANSWERS.handoffAskCity;
-    case "pairSingle":
-      return ANSWERS.handoffAskPairSingle;
+    case "lookingFor":
+      return ANSWERS.handoffAskLookingFor;
     case "delivery":
       return ANSWERS.handoffAskDelivery;
     case "timeline":
@@ -570,8 +617,7 @@ function advance(state: ChatState, prefix?: string): Turn {
 function nextStepAfterName(state: ChatState): HandoffStep | null {
   for (const step of HANDOFF_ORDER) {
     if (step === "name") continue;
-    if (state.handoff.declined.includes(step)) continue;
-    if (step === "delivery" && state.lead.inShipStates === false) continue;
+    if (skipStep(state, step)) continue;
     if (!state.lead[step]) return step;
   }
   return null;
@@ -581,7 +627,13 @@ function join(...parts: Array<string | undefined>): string {
   return parts.filter((p) => p && p.trim()).join("\n\n");
 }
 
-function startHandoff(state: ChatState, raw: string, prefix?: string): Turn {
+/** LB-11: per-path slot setup (see HANDOFF_KIND). */
+function applyHandoffKind(state: ChatState, kind: ChatState["handoffKind"]): void {
+  state.handoff.skip = kind === "claim" ? ["lookingFor"] : [];
+  if (kind === "fish") state.lead.lookingFor ??= LOOKING_FISH;
+}
+
+function startHandoff(state: ChatState, raw: string, prefix?: string, kind: ChatState["handoffKind"] = state.handoffKind): Turn {
   if (state.completed) {
     state.pendingOffer = null;
     return { reply: join(prefix, ANSWERS.handoffAlreadyDone), intent: "handoff_already_done" };
@@ -589,6 +641,7 @@ function startHandoff(state: ChatState, raw: string, prefix?: string): Turn {
   state.handoff.active = true;
   state.handoff.phoneTries = 0;
   state.handoff.declined = [];
+  applyHandoffKind(state, kind);
   state.pendingOffer = null;
   prefillFromMessage(state, raw, norm(raw));
   return advance(state, prefix);
@@ -922,8 +975,14 @@ const SHIP_WORD =
 const GENERIC_PLACE = /^(abroad|overseas|outside india|out of india|international|internationally|foreign|outside the country|other countries|another country)$/;
 const UPPER_PLACE: Record<string, string> = { uae: "UAE", usa: "USA", uk: "UK" };
 /** LB-6 (Shiva, 3 Oct): outside the 8 train states -> care-first, tentative handoff offer. Never a refusal. */
-function outOfArea(place: Place): string {
+function outOfArea(state: ChatState, place: Place): string {
   const name = GENERIC_PLACE.test(place.name) ? undefined : UPPER_PLACE[place.name] ?? titleCase(place.name);
+  // LB-7 follow-up: the alert goes out once name + number are in, so keep the place the
+  // visitor already named for the email (and don't ask for the city again).
+  if (name) {
+    state.lead.city ??= name;
+    state.lead.inShipStates = false;
+  }
   return outOfAreaReply(name, place.zone === "abroad");
 }
 
@@ -939,10 +998,10 @@ function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean } = {
     }
     addFlag(state, "OUTSIDE 8 STATES");
     state.pendingOffer = "handoff";
-    if (place.zone === "other") return { reply: outOfArea(place), intent: "ship_other_state" };
+    if (place.zone === "other") return { reply: outOfArea(state, place), intent: "ship_other_state" };
     addFlag(state, "REMOTE");
-    if (place.zone === "remote") return { reply: outOfArea(place), intent: "ship_remote" };
-    return { reply: outOfArea(place), intent: "ship_abroad" };
+    if (place.zone === "remote") return { reply: outOfArea(state, place), intent: "ship_remote" };
+    return { reply: outOfArea(state, place), intent: "ship_abroad" };
   }
   state.pendingOffer = null;
   return { reply: withSop ? join(ANSWERS.shipInStates, SOP_BLOCK) : ANSWERS.shipInStates, intent: "ship_general" };
@@ -1064,6 +1123,7 @@ function lossSafetyNet(state: ChatState, raw: string): Turn {
   state.handoff.active = true;
   state.handoff.phoneTries = 0;
   state.handoff.declined = [];
+  applyHandoffKind(state, "claim"); // LB-11: a loss / DOA claim isn't a fish-or-food purchase
   state.handoff.awaitingConsent = true;
   state.pendingOffer = null;
   prefillFromMessage(state, raw, norm(raw));
@@ -1152,10 +1212,10 @@ function guaranteeAnswer(state: ChatState, t: string): Turn {
   }
   addFlag(state, "OUTSIDE 8 STATES");
   state.pendingOffer = "handoff";
-  if (place.zone === "other") return { reply: outOfArea(place), intent: "guarantee_other_state" };
+  if (place.zone === "other") return { reply: outOfArea(state, place), intent: "guarantee_other_state" };
   addFlag(state, "REMOTE");
-  if (place.zone === "remote") return { reply: outOfArea(place), intent: "guarantee_remote" };
-  return { reply: outOfArea(place), intent: "guarantee_abroad" };
+  if (place.zone === "remote") return { reply: outOfArea(state, place), intent: "guarantee_remote" };
+  return { reply: outOfArea(state, place), intent: "guarantee_abroad" };
 }
 
 const sizeAskRe = /(\d+(?:\.\d+)?)\s*(?:"|inch|inches)|\b(small|big|large|adult|juvenile)\s+(ones?|fish|discus|size)\b/;
@@ -1177,7 +1237,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "doa_report", tier: "safety", faq: "FAQ 10 (report)",
     test: (m) => isDoaReport(m.t),
-    run: ({ state, raw }) => { addFlag(state, "DOA CLAIM"); return startHandoff(state, raw, ANSWERS.doa); },
+    run: ({ state, raw }) => { addFlag(state, "DOA CLAIM"); return startHandoff(state, raw, ANSWERS.doa, "claim"); },
   },
   {
     id: "mortality", tier: "safety", faq: "FAQ 21",
@@ -1234,7 +1294,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "doa_refund", tier: "safety", faq: "FAQ 10 (report)",
     test: (m) => RE.doaReport.test(m.t),
-    run: ({ state, raw }) => { addFlag(state, "DOA CLAIM"); return startHandoff(state, raw, ANSWERS.doa); },
+    run: ({ state, raw }) => { addFlag(state, "DOA CLAIM"); return startHandoff(state, raw, ANSWERS.doa, "claim"); },
   },
   {
     id: "sick_fish", tier: "safety", faq: "FAQ 18",
@@ -1380,9 +1440,10 @@ export const INTENT_RULES: readonly IntentRule[] = [
   { id: "goat_heart", tier: "faq", faq: "FAQ 16", test: (m) => RE.goatHeart.test(m.t), run: ({ state, ctx }) => foodAnswer(state, ctx, true) },
   { id: "food", tier: "faq", faq: "FAQ 15", test: (m) => RE.food.test(m.t), run: ({ state, ctx }) => foodAnswer(state, ctx, false) },
   {
-    id: "pair_or_single", tier: "faq", faq: "FAQ 4",
+    // LB-11: "should I buy a pair?" -> prices are per piece, choose the quantity on the card (+ steps).
+    id: "how_many_to_buy", tier: "faq", faq: "FAQ 4",
     test: (m) => RE.pairSingle.test(m.t),
-    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.pairOrSingle, intent: "pair_or_single" }; },
+    run: ({ state }) => { state.pendingOffer = null; return { reply: join(ANSWERS.howManyToBuy, SITE_STEPS), intent: "how_many_to_buy" }; },
   },
   {
     id: "per_piece", tier: "faq", faq: "FAQ 2 (per piece)",
@@ -1548,6 +1609,18 @@ export function safetyIntent(raw: string): string | null {
   return rule ? rule.id : null;
 }
 
+/**
+ * LB-11: per-path fish-or-food slot.
+ * - claim: sick fish, mortality, refund-for-sure -> no fish-or-food question (DOA / loss net set it directly).
+ * - fish: strain not listed, hold beyond 7 days, safe-arrival guarantee -> already about fish, not asked.
+ * - everything else (visit, store pickup, reseller, outside the 8 states, claimed offer) -> asked.
+ */
+function handoffKindOf(intent: string): ChatState["handoffKind"] {
+  if (/^(sick_fish|mortality|doa_policy|loss_safety_net)$/.test(intent)) return "claim";
+  if (/^(strain_not_listed|holding_beyond|guarantee_)/.test(intent) || intent === "quarantine_ship") return "fish";
+  return undefined;
+}
+
 /** Normal (non-handoff) routing: first matching rule in INTENT_RULES wins. */
 async function routeIntent(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
   const m: Msg = { state, raw, t, ctx, offTopic: isOffTopic(t) };
@@ -1555,9 +1628,14 @@ async function routeIntent(state: ChatState, raw: string, t: string, ctx: Ctx): 
     if (rule.tier === "faq" && m.offTopic) continue;
     if (!rule.test(m)) continue;
     const turn = await rule.run(m);
-    if (turn) return turn;
+    if (turn) {
+      // LB-11: remember what a handoff offer was about (read by startHandoff on "yes").
+      state.handoffKind = state.pendingOffer === "handoff" ? handoffKindOf(turn.intent) : undefined;
+      return turn;
+    }
   }
   state.pendingOffer = null;
+  state.handoffKind = undefined;
   return { reply: ANSWERS.unclear, intent: "unclear" };
 }
 
@@ -1593,6 +1671,16 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
   }
   const answered = !interrupt && looksLikeAnswer(step, raw, t);
 
+  // LB-11: a number typed at a later step ("9845012345" while asked fish-or-food) is
+  // still the number: keep it and carry on, instead of treating it as a side question.
+  if (!interrupt && !answered && step !== "name" && step !== "phone" && !state.lead.phone) {
+    const phone = extractIndianMobile(raw);
+    if (phone) {
+      state.lead.phone = phone;
+      return advance(state);
+    }
+  }
+
   // A question instead of an answer: answer it, then re-ask the same field.
   // Prompt attacks and other safety rules always take this path.
   if (interrupt || (!answered && !RE.declineField.test(t))) {
@@ -1615,7 +1703,7 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
       return { reply: join(r.reply, askFor(step, state)), intent: "prompt_attack+handoff" };
     }
     // An unrecognised question at a free-text step: don't store it as the answer; ask again.
-    if (raw.includes("?") && (step === "pairSingle" || step === "delivery" || step === "timeline")) {
+    if (raw.includes("?") && (step === "lookingFor" || step === "delivery" || step === "timeline")) {
       return { reply: join(ANSWERS.unclear, askFor(step, state)), intent: "unclear+handoff" };
     }
   }
@@ -1654,12 +1742,16 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
       else applyCity(state, raw, t);
       break;
     }
-    case "pairSingle": {
-      const v = parsePairSingle(t);
-      if (v) state.lead.pairSingle = v;
-      else if (RE.declineField.test(t)) state.handoff.declined.push("pairSingle");
-      else state.lead.pairSingle = raw.trim().slice(0, 60);
-      break;
+    case "lookingFor": {
+      const v = parseLookingFor(t);
+      if (v) state.lead.lookingFor = v;
+      else if (RE.declineField.test(t)) state.handoff.declined.push("lookingFor");
+      else if ((state.handoff.lookingTries ?? 0) < 1) {
+        state.handoff.lookingTries = (state.handoff.lookingTries ?? 0) + 1;
+        return { reply: ANSWERS.handoffAskLookingFor, intent: "handoff_lookingFor_retry" };
+      } else state.lead.lookingFor = raw.trim().slice(0, 60);
+      // Fish -> Current Stock; frozen foods -> /frozen + /pellets; same Shopping Bag steps.
+      return advance(state, lookingForPointer(state.lead.lookingFor));
     }
     case "delivery": {
       const v = parseDelivery(t);
@@ -1694,6 +1786,9 @@ function newProbe(state: ChatState): ChatState {
  */
 export async function respond(prev: ChatState | null | undefined, message: string, ctx: Ctx): Promise<EngineResult> {
   const state: ChatState = prev && prev.v === 1 ? structuredClone(prev) : newChatState();
+  // LB-11: sessions saved mid-handoff before the change may still sit on the old pair/single step.
+  if ((state.handoff.step as string | undefined) === "pairSingle") state.handoff.step = "lookingFor";
+  state.handoff.declined = state.handoff.declined.map((s) => ((s as string) === "pairSingle" ? "lookingFor" : s));
   const raw = String(message ?? "").trim();
   const t = norm(raw);
   state.turns += 1;

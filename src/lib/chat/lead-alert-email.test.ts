@@ -30,7 +30,7 @@ const SID = "3f2b8c1e-9a4d-4e2f-8b6a-00000000e001";
  * visit request, then "yes" to "Shall I pass your details?".
  */
 const OPEN = ["Can I visit the store?", "yes"];
-const HANDOFF = [...OPEN, "Ravi", "9845012345", "Kochi", "single", "train", "ready now"];
+const HANDOFF = [...OPEN, "Ravi", "fish", "9845012345", "Kochi", "train", "ready now"];
 
 function offlineCatalog(): CatalogLoader {
   return createCatalogLoader({ fetch: async () => ({ ok: false, status: 500, text: async () => "" }) });
@@ -46,7 +46,7 @@ function post(body: unknown, sid = SID): Request {
 
 function leadState(over: Partial<ChatState> = {}): ChatState {
   const s = newChatState();
-  s.lead = { name: "Ravi <b>Kumar</b>", phone: "+919845012345", city: "Kochi", pairSingle: "pair" };
+  s.lead = { name: "Ravi <b>Kumar</b>", phone: "+919845012345", city: "Kochi", lookingFor: "Discus fish" };
   s.tags = { buyer: "hobbyist", history: "first-timer", heat: "hot" };
   s.flags = ["DOA CLAIM", "LONG HOLD"];
   s.interests = ["Red Ninja Discus", "Yellow Diamonds"];
@@ -85,7 +85,7 @@ describe("LB-4 · lead alert email content", () => {
   const email = buildLeadAlertEmail(lead, TRANSCRIPT, { to: TO, now: new Date("2026-10-02T19:00:00Z") });
 
   it("subject: New chat lead: <name> — <summary with tags, strains, place>", () => {
-    assert.match(email.subject, /^New chat lead: Ravi <b>Kumar<\/b> — DOA CLAIM · LONG HOLD · Red Ninja Discus, Yellow Diamonds · Kochi · pair$/);
+    assert.match(email.subject, /^New chat lead: Ravi <b>Kumar<\/b> — DOA CLAIM · LONG HOLD · Red Ninja Discus, Yellow Diamonds · Kochi · Discus fish$/);
     assert.doesNotMatch(email.subject, /[\r\n]/);
   });
 
@@ -240,7 +240,7 @@ describe("LB-4 · /api/chat sends the email once per completed handoff", () => {
       catalog: offlineCatalog(),
       sendAlert: (l: LeadForAlert, t: TranscriptLine[]) => sendLeadAlert(l, t, EMAIL_ENV, fetchImpl),
     };
-    await runChat(deps, ["My fish arrived dead in the box", "Ravi", "9845012345", "Kochi", "single", "train", "ready now"], "3f2b8c1e-9a4d-4e2f-8b6a-00000000e002");
+    await runChat(deps, ["My fish arrived dead in the box", "Ravi", "9845012345", "Kochi", "train", "ready now"], "3f2b8c1e-9a4d-4e2f-8b6a-00000000e002");
     assert.equal(calls.length, 1);
     assert.match(JSON.parse(String(calls[0]!.init.body)).subject, /DOA CLAIM/);
   });
@@ -329,4 +329,37 @@ describe("LB-4 · /api/chat sends the email once per completed handoff", () => {
     await Promise.all(pending);
     assert.equal(sent, 1);
   });
+});
+
+describe("LB-11 + LB-7 · lead email: fish-or-food, never pair/single", () => {
+  const PAIR_SINGLE = /pair\s*\/\s*single|pair\s+or\s+single|single\s+fish|\bPair\b/i;
+  const cases: Array<[string, string[], RegExp | null]> = [
+    ["visit, fish", [...OPEN, "Ravi", "Discus fish", "9845012345", "Chennai", "I'll visit", "ready now"], /Looking for: Discus fish\b/],
+    ["visit, frozen foods", [...OPEN, "Meena", "frozen foods", "9123456780", "Chennai", "pickup"], /Looking for: Discus frozen foods/],
+    ["reseller, both", ["I'm a reseller, do you do wholesale?", "yes", "Arun", "both", "9800011122", "Madurai", "train", "few weeks"], /Looking for: Discus fish and frozen foods/],
+    ["outside the 8 states", ["will you ship to Kolkata", "yes", "Ravi", "fish", "9845012345", "ready now"], /Looking for: Discus fish\b/],
+    ["DOA claim (slot dropped)", ["my fish arrived dead", "yes", "Ravi", "9845012345", "Kochi", "train", "ready now"], null],
+  ];
+  let n = 0;
+  for (const [label, msgs, looking] of cases) {
+    const sid = `3f2b8c1e-9a4d-4e2f-8b6a-0000000b11${String(n++).padStart(2, "0")}`;
+    it(`${label}: exactly one email; ${looking ? "carries fish-or-food" : "no fish-or-food line"}; no pair/single`, async () => {
+      const { calls, fetchImpl } = recorder();
+      const deps = {
+        store: createMemoryChatStore(),
+        catalog: offlineCatalog(),
+        env: EMAIL_ENV,
+        sendAlert: (l: LeadForAlert, t: TranscriptLine[]) => sendLeadAlert(l, t, EMAIL_ENV, fetchImpl),
+      };
+      const out = await runChat(deps, [...msgs, "thanks"], sid);
+      assert.ok(out.every((o) => o.status === 200));
+      assert.equal(calls.length, 1, label);
+      const body = JSON.parse(String(calls[0]!.init.body));
+      for (const part of [body.subject, body.text, body.html]) assert.doesNotMatch(part, PAIR_SINGLE, label);
+      if (looking) {
+        assert.match(body.text, looking, label);
+        assert.match(body.html, looking, label);
+      } else assert.doesNotMatch(body.text, /Looking for:/, label);
+    });
+  }
 });

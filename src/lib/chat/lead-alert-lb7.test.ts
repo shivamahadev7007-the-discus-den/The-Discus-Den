@@ -15,8 +15,10 @@ import { sendLeadAlert, type AlertFetch, type LeadForAlert, type TranscriptLine 
 import { createMemoryChatStore } from "./store.ts";
 
 const EMAIL_ENV = { CHAT_LEAD_ALERT_MODE: "email", RESEND_API_KEY: "re_test_FAKEKEY_lb7", CHAT_LEAD_ALERT_EMAIL_TO: "owner@example.com" };
-const FULL = ["Talk to Shiva", "Ravi", "9845012345", "Kochi", "single", "train", "ready now"];
-const STOP_AFTER_NUMBER = ["Talk to Shiva", "Ravi", "9845012345"];
+/** LB-6: "Talk to Shiva" now steers to the site; a genuine handoff opens via a store visit. */
+const OPEN = ["Can I visit the store?", "yes"];
+const FULL = [...OPEN, "Ravi", "fish", "9845012345", "Kochi", "train", "ready now"];
+const STOP_AFTER_NUMBER = [...OPEN, "Ravi", "fish", "9845012345"];
 
 function offlineCatalog(): CatalogLoader {
   return createCatalogLoader({ fetch: async () => ({ ok: false, status: 500, text: async () => "" }) });
@@ -87,20 +89,20 @@ describe("LB-7 · alert fires when the lead is actionable", () => {
     assert.match(body.text, /Phone\/WhatsApp: \+919845012345/);
     assert.equal(store.leads.get(sid(7001))?.alertStatus, "sent");
     // The handoff itself carries on normally (asks for the city next).
-    assert.match(out[2]!.reply, /city/i);
+    assert.match(out.at(-1)!.reply, /city/i);
     for (const o of out) assert.doesNotMatch(o.reply, /9845012345/);
   });
 
   it("full handoff -> still exactly one email (not one at the number and another at the end)", async () => {
     const { calls, fetchImpl } = recorder();
-    const { result: out } = await quiet(() => runChat(emailDeps(createMemoryChatStore(), fetchImpl), [...FULL, "thanks", "Talk to Shiva"], sid(7002)));
+    const { result: out } = await quiet(() => runChat(emailDeps(createMemoryChatStore(), fetchImpl), [...FULL, "thanks", "Can I visit the store?"], sid(7002)));
     assert.ok(out.every((o) => o.status === 200));
     assert.equal(calls.length, 1);
   });
 
   it("name only, no number -> no email", async () => {
     const { calls, fetchImpl } = recorder();
-    await quiet(() => runChat(emailDeps(createMemoryChatStore(), fetchImpl), ["Talk to Shiva", "Ravi", "I'd rather not share"], sid(7003)));
+    await quiet(() => runChat(emailDeps(createMemoryChatStore(), fetchImpl), [...OPEN, "Ravi", "I'd rather not share"], sid(7003)));
     assert.equal(calls.length, 0);
   });
 
