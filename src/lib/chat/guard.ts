@@ -4,7 +4,8 @@
  * 1. Strips phone-number-like digit runs (7+ digits, with spaces/dashes/+/dots
  *    between), emails and UPI handles.
  * 2. Blocks the whole reply (swaps in a safe line) if it contains a
- *    never-say term: stock figures, losses, supplier/breeder talk, payment
+ *    never-say term: any quantity on hand or scarcity wording (the bot says
+ *    only "in stock" / "out of stock", Shiva's ruling 3 Oct), losses, supplier/breeder talk, payment
  *    confirmation, refund approval, medicine/dosing, coupon-looking codes,
  *    discount-shop words.
  * 3. Fixes the brand name ("Discus Den" without "The" -> "The Discus Den").
@@ -22,6 +23,12 @@ const BLOCK_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "stock-count", re: /\b\d+\s+(left|remaining)\b/i },
   { name: "stock-count", re: /\b(in\s+stock\s*:?\s*\d+|stock\s+count|units?\s+left|pieces?\s+left)\b/i },
   { name: "stock-count", re: /\b(selling\s+fast|plenty\s+left|a\s+few\s+left|few\s+left)\b/i },
+  // Shiva's ruling (3 Oct): never a quantity on hand, however it's phrased.
+  { name: "stock-count", re: /\b\d+\s+(in\s+the\s+den|in\s+stock|on\s+hand|available|remaining|pieces?|pcs|units?|nos)\b/i },
+  { name: "stock-count", re: /\b\d+\s+(fish|discus)\s+(left|available|in\s+stock|on\s+hand|remaining)\b/i },
+  { name: "stock-count", re: /\b(only|just|about|around|exactly|over|under)\s+\d+\s+(left|of\s+them|in\s+stock|available)\b/i },
+  { name: "stock-count", re: /\b(stock|qty|quantity)\s*(:|is|of|=)\s*\d+\b/i },
+  { name: "stock-count", re: /\b(we\s+have|there\s+are|got)\s+\d+\s+(of\s+(them|those)|left|\w+\s+(left|in\s+stock))\b/i },
   { name: "mortality", re: /\b(mortality|died\s+in\s+(our|the)\s+tanks?|death\s+rate|losses)\b/i },
   { name: "supplier", re: /\b(supplier|breeder|source\s+farm|imported\s+from|we\s+source)\b/i },
   { name: "payment-confirm", re: /\b(payment|amount|money)\s+(is\s+|has\s+been\s+)?(received|confirmed|credited)\b/i },

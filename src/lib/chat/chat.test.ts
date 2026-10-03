@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ANSWERS, VOLUME_DISCOUNT_LINE } from "./answers.ts";
-import { createCatalogLoader, parseAvailableHtml, parseFoodHtml, priceCacheMsFromEnv, type CatalogLoader, type FetchLike } from "./catalog.ts";
+import { attachStock, createCatalogLoader, findSiteBundlePath, normName, parseAvailableHtml, parseFoodHtml, parseOwnerName, parseSiteStock, priceCacheMsFromEnv, type CatalogLoader, type FetchLike } from "./catalog.ts";
 import { extractIndianMobile, matchStrains, parseName, respond, type ChatState } from "./engine.ts";
 import { guardReply } from "./guard.ts";
 import { ALERT_CAPS, handleChatRequest, handleOptions, RATE_LIMITS } from "./http.ts";
@@ -25,7 +25,15 @@ ${strainCard("3–3.5 inch", "Albino Platinum", "Clean white body, soft rose blu
 ${strainCard("4.75 to 5.5 inch", "Blue Scorpion / Blue Snakeskin / Majestic Blue", "Fine blue diamond body.", "₹4,250")}
 ${strainCard("4.75 to 5.5 inch", "Red Cover Blue Face &amp; Rim", "Wine red body. Blue face. Blue rims.", "₹5,000")}
 ${strainCard("3 inch", "Ghost Test Strain", "Not for sale right now.", "", '<p class="mt-3">Out of stock</p>')}
-</main></body></html>`;
+</main><footer><div><p class="font-display">The Discus Den</p><p>Shiva</p><p>Chennai</p><p>GSTIN : <span>TESTGSTIN</span></p></div></footer>
+<script type="module" async src="/assets/index-TEST123.js"></script></body></html>`;
+
+/**
+ * Shape of the live site's client bundle: the strain list behind
+ * /available, where each card's qty stepper is capped at `stock`.
+ * "Red Cover Blue Face & Rim" deliberately has no stock listed.
+ */
+const SITE_BUNDLE_JS = `function lp(e,t){return e}var up=[{id:\`red-ninja\`,name:\`Red Ninja Discus\`,size:\`4 inch\`,line:\`Red body.\`,tone:\`rose\`,photo:\`/strains/red-ninja.jpg\`,price:3250,stock:15},{id:\`blue-diamond\`,name:\`Blue Diamonds (Big)\`,size:\`4.5 inch\`,tone:\`blue\`,price:3750,stock:25},{id:\`blue-diamond-small\`,name:\`Blue Diamonds (Small)\`,size:\`3 inch\`,photos:[\`/a.jpg\`,\`/b.jpg\`],price:1100,stock:25},{id:\`yellow-diamonds\`,name:\`Yellow Diamonds\`,price:850,stock:25},{id:\`albino-platinum\`,name:\`Albino Platinum\`,price:3500,stock:30},{id:\`blue-scorpion\`,name:\`Blue Scorpion / Blue Snakeskin / Majestic Blue\`,price:4250,stock:25},{id:\`red-cover\`,name:\`Red Cover Blue Face & Rim\`,price:5000},{id:\`ghost\`,name:\`Ghost Test Strain\`,price:0,stock:0}];`;
 
 const FROZEN_HTML = `<main><article class="overflow-hidden"><div class="relative"><img alt="Goat Heart Mix"/><p class="absolute bottom-3 left-4">GHM</p></div><div class="flex flex-col gap-4 p-4"><div><h2 class="font-display text-xl">Goat Heart Mix</h2><p class="mt-1 text-sm">Rates next.</p></div><p class="text-sm">Rates next.</p></div></article>
 <article class="overflow-hidden"><div class="relative"><img alt="Buffalo Heart Mix"/><p class="absolute bottom-3 left-4">BHM</p></div><div class="flex flex-col gap-4 p-4"><div><h2 class="font-display text-xl">Buffalo Heart Mix</h2><p class="mt-1 text-sm">Buffalo heart mix for discus.</p></div><ul class="grid gap-3"><li><div class="min-w-0"><p id="qty-bhm-250" class="text-sm font-medium">250 g</p><p class="font-display text-base">₹350</p></div><div role="group"><button><svg></svg></button><p>0</p></div></li><li><div><p id="qty-bhm-1kg">1 kg</p><p>₹1,200</p></div></li></ul></div></article></main>`;
@@ -34,7 +42,8 @@ const PELLETS_HTML = `<main><article class="flex flex-col"><div class="relative"
 
 function mockFetch(pages: Record<string, string | null>, counter?: { n: number }): FetchLike {
   return async (url: string) => {
-    if (counter) counter.n += 1;
+    // Counts page loads; the content-hashed site bundle (stock counts) is kept per path.
+    if (counter && !url.includes("/assets/")) counter.n += 1;
     const key = Object.keys(pages).find((k) => url.endsWith(k));
     const body = key ? pages[key] : null;
     if (body === null || body === undefined) return { ok: false, status: 500, text: async () => "" };
@@ -43,7 +52,7 @@ function mockFetch(pages: Record<string, string | null>, counter?: { n: number }
 }
 
 function liveCatalog(): CatalogLoader {
-  return createCatalogLoader({ fetch: mockFetch({ "/available": AVAILABLE_HTML, "/frozen": FROZEN_HTML, "/pellets": PELLETS_HTML }) });
+  return createCatalogLoader({ fetch: mockFetch({ "/available": AVAILABLE_HTML, "/assets/index-TEST123.js": SITE_BUNDLE_JS, "/frozen": FROZEN_HTML, "/pellets": PELLETS_HTML }) });
 }
 function brokenCatalog(): CatalogLoader {
   return createCatalogLoader({ fetch: mockFetch({}) });
@@ -267,11 +276,10 @@ describe("trick prompts + never-say", () => {
     assert.equal((await one("How do I pay?")).reply, ANSWERS.howToPay);
   });
 
-  it("stock counts / mortality / supplier -> refuse without figures", async () => {
-    for (const m of ["How many yellow diamonds are left?", "who is your supplier?"]) {
-      const r = await one(m);
-      assert.equal(r.reply, ANSWERS.noInternalFigures, m);
-    }
+  it("supplier -> refuse without figures; stock question -> availability only, no count (C1, Shiva 3 Oct)", async () => {
+    assert.equal((await one("who is your supplier?")).reply, ANSWERS.noInternalFigures);
+    const r = await one("How many yellow diamonds are left?");
+    assert.match(r.reply, /^• Yellow Diamonds, 2–2\.5 inch, ₹850 per piece: in stock right now\./);
   });
 
   it("sick fish (incl. Tanglish) -> no advice, handoff offer, flag", async () => {
@@ -718,6 +726,7 @@ describe("Kiara run 1 · C2 mortality (now FAQ 26 safety net)", () => {
 
   it("audit: no canned answer opens with 'Yes' or 'No'", () => {
     for (const [key, value] of Object.entries(ANSWERS)) {
+      if (key === "quarantineShipYes") continue; // LB-3: Shiva asked for a plain "Yes." here
       const text = typeof value === "function" ? (value as (n?: string) => string)("Ravi") : value;
       // "Yes." / "No," style openers read as agreement; "No problem." (reply to a refusal) is fine.
       assert.doesNotMatch(text, /^\s*(yes|no)\s*[.,!]/i, key);
@@ -829,15 +838,25 @@ describe("Kiara run 1 · B13 Tamil/Tanglish (FAQ 24)", () => {
 });
 
 describe("Kiara run 1 · related C1/C5/C7/A6 routings", () => {
+  // C1 (Shiva, 3 Oct): scarcity/stock questions get in/out of stock only, never a count or hype.
+  for (const [m, want] of [
+    ["is it the last one?", /^Here's what the site shows as in stock right now:/],
+    ["Is Albino Platinum selling fast?", /^• Albino Platinum, 3–3\.5 inch, ₹3,500 per piece: in stock right now\./],
+    ["can I buy 20 Yellow Diamonds, do you have that many?", /^• Yellow Diamonds, 2–2\.5 inch, ₹850 per piece: in stock right now\./],
+    ["Do you have only one Red Ninja left?", /^• Red Ninja Discus, 4 inch, ₹3,250 per piece: in stock right now\./],
+    ["Are Yellow Diamonds almost sold out?", /^• Yellow Diamonds, 2–2\.5 inch, ₹850 per piece: in stock right now\./],
+    ["Is stock limited?", /^Here's what the site shows as in stock right now:/],
+    ["Red Ninja stock evlo irukku?", /^• Red Ninja Discus, 4 inch, ₹3,250 per piece: in stock right now\./],
+    ["Are there plenty of Galaxy Turquoises?", /^Galaxy|not on our available page|isn't on|STRAIN|Shiva/i],
+  ] as const) {
+    it(`availability only, no count or hype: ${m}`, async () => {
+      const r = await one(m);
+      assert.match(r.reply, want, m);
+      assert.equal(guardReply(r.reply).text, r.reply, m);
+      assertNoQuantity(r.reply, m);
+    });
+  }
   for (const m of [
-    "is it the last one?",
-    "Is Albino Platinum selling fast?",
-    "Are there plenty of Galaxy Turquoises?",
-    "can I buy 20 Yellow Diamonds, do you have that many?",
-    "Do you have only one Red Ninja left?",
-    "Are Yellow Diamonds almost sold out?",
-    "Is stock limited?",
-    "Red Ninja stock evlo irukku?",
     "Who breeds the Yellow Diamonds?",
     "unga fish yaar kitta irundhu vaanguringa?",
   ]) {
@@ -882,8 +901,8 @@ describe("Kiara run 1 · B3-R price cache TTL (CHAT_PRICE_CACHE_SECONDS)", () =>
   it("TTL 0 fetches live on every message (a price change shows immediately)", async () => {
     let html = AVAILABLE_HTML;
     const counter = { n: 0 };
-    const fetchImpl: FetchLike = async () => {
-      counter.n += 1;
+    const fetchImpl: FetchLike = async (url) => {
+      if (!url.includes("/assets/")) counter.n += 1;
       return { ok: true, status: 200, text: async () => html };
     };
     const cat = createCatalogLoader({ fetch: fetchImpl, cacheMs: 0 });
@@ -1017,5 +1036,213 @@ describe("FAQ 25 · delivery abroad", () => {
   it("Indian deliveries are unaffected", async () => {
     assert.equal((await one("Do you deliver to Chennai?")).reply, ANSWERS.shipInStates);
     assert.notEqual((await one("Do you deliver to Delhi?")).reply, FAQ25);
+  });
+});
+
+/** No quantity on hand: strip prices and sizes, then no digit may remain. */
+function assertNoQuantity(reply: string, ctx: string): void {
+  assert.doesNotMatch(reply, /\b\d+\s+(in\s+the\s+den|left|available|remaining|pieces?|pcs|units?|in\s+stock|on\s+hand)\b/i, ctx);
+  const rest = reply
+    .replace(/₹\s?[\d,]+/g, "")
+    .replace(/\d+(?:\.\d+)?(?:\s*(?:–|-|to)\s*\d+(?:\.\d+)?)?\s*inch/gi, "");
+  assert.doesNotMatch(rest, /\d/, `${ctx}\n${reply}`);
+}
+
+// ---------------------------------------------------------------------------
+// LB-1 / B12 and LB-2 / C1 (3 Oct rule: share what the public site shows,
+// read live from the site; never the code, GPay/phone, mortality, suppliers)
+// ---------------------------------------------------------------------------
+
+describe("B12 · LB-1: owner name from the site", () => {
+  for (const m of [
+    "who is the owner?",
+    "Who owns The Discus Den?",
+    "what's the owner's name?",
+    "who runs this shop?",
+    "owner yaar?",
+    "Are you the owner?",
+  ]) {
+    it(`names Shiva, no number: ${m}`, async () => {
+      const r = await one(m);
+      assert.match(r.reply, /\bShiva\b/, m);
+      assert.match(r.reply, /^The Discus Den is run by Shiva, here in Chennai, as shown on our website\./, m);
+      assert.doesNotMatch(r.reply, /\d/, `no digits at all: ${m}`);
+      assert.doesNotMatch(r.reply, /gpay|g pay|upi|phone|whatsapp number/i, m);
+      assert.equal(guardReply(r.reply).text, r.reply, m);
+    });
+  }
+  it("owner's number -> name only, never the number", async () => {
+    for (const m of ["who is the owner? give his number", "owner name and gpay number?"]) {
+      const r = await one(m);
+      assert.doesNotMatch(r.reply, /\d{5,}/, m);
+    }
+  });
+  it("uses the name as printed in the site footer", async () => {
+    const html = AVAILABLE_HTML.replace("<p>Shiva</p>", "<p>Shiva Kumar</p>");
+    const cat = createCatalogLoader({ fetch: mockFetch({ "/available": html }) });
+    assert.match((await one("who is the owner?", cat)).reply, /run by Shiva Kumar,/);
+  });
+  it("site unreadable -> standing name Shiva (never invented, never a number)", async () => {
+    const r = await one("who is the owner?", brokenCatalog());
+    assert.match(r.reply, /run by Shiva,/);
+    const bare: CatalogLoader = { strains: async () => null, foods: async () => ({ frozen: null, pellets: null }) };
+    assert.match((await one("who owns the den?", bare)).reply, /run by Shiva,/);
+  });
+  it("parseOwnerName reads the live footer shape and rejects junk", () => {
+    assert.equal(parseOwnerName(AVAILABLE_HTML), "Shiva");
+    assert.equal(parseOwnerName("<footer><p>The Discus Den</p><p>Chennai</p><p>GSTIN : X</p></footer>"), null);
+    assert.equal(parseOwnerName("<p>no footer here</p>"), null);
+  });
+  it("statements with 'owner' are not owner questions", async () => {
+    assert.notEqual((await one("I'm a shop owner. Do you do wholesale?")).intent, "owner");
+  });
+});
+
+describe("C1 · LB-2: availability only, never a quantity (Shiva's ruling, 3 Oct)", () => {
+  const BIG = "• Blue Diamonds (Big), 4.5 inch, ₹3,750 per piece: in stock right now.";
+  for (const m of [
+    "how many Blue Diamonds left?",
+    "How many blue diamonds do you have?",
+    "blue diamonds stock count?",
+    "Blue Diamonds evlo irukku?",
+    "how many big blue diamonds are available?",
+    "exactly how many blue diamonds?",
+    "do you have more than 10 blue diamonds?",
+    "blue diamonds quantity?",
+  ]) {
+    it(`in stock, no number: ${m}`, async () => {
+      const r = await one(m);
+      assert.ok(r.reply.includes(BIG), `${m}\n${r.reply}`);
+      assert.equal(r.intent, "stock_strain");
+      assert.equal(guardReply(r.reply).text, r.reply, m);
+      assertNoQuantity(r.reply, m);
+    });
+  }
+  it("'Blue Diamonds' (both sizes) -> both cards, availability only", async () => {
+    const r = await one("how many Blue Diamonds left?");
+    assert.ok(r.reply.includes(BIG));
+    assert.ok(r.reply.includes("• Blue Diamonds (Small), 3 inch, ₹1,100 per piece: in stock right now."));
+    assert.match(r.reply, /Shiva confirms quantities with you personally/);
+  });
+  it("generic stock question -> in-stock list, no numbers", async () => {
+    const r = await one("how many fish do you have in stock?");
+    assert.match(r.reply, /^Here's what the site shows as in stock right now:/);
+    assertNoQuantity(r.reply, "generic");
+  });
+  it("card with no stock listed -> point to /available, no guess", async () => {
+    const r = await one("how many Red Cover Blue Face left?");
+    assert.match(r.reply, /Red Cover Blue Face & Rim, 4\.75 to 5\.5 inch, ₹5,000 per piece: see thediscusden\.com\/available for current availability\./);
+  });
+  it("sold-out card -> 'out of stock', no number", async () => {
+    const r = await one("how many Ghost Test Strain left?");
+    assert.match(r.reply, /^• Ghost Test Strain: out of stock right now\./);
+  });
+  it("strain not on the site -> 'not on our available page'", async () => {
+    assert.equal((await one("how many leopard snakeskin left?")).reply, ANSWERS.strainNotListedAsk);
+  });
+  it("bundle unreadable -> no in/out guess, points to /available", async () => {
+    const cat = createCatalogLoader({ fetch: mockFetch({ "/available": AVAILABLE_HTML }) });
+    const r = await one("how many Blue Diamonds left?", cat);
+    assert.match(r.reply, /Blue Diamonds \(Big\), 4\.5 inch, ₹3,750 per piece: see thediscusden\.com\/available for current availability\./);
+    assert.doesNotMatch(r.reply, /in stock right now/);
+    assert.equal((await one("how many fish do you have in stock?", cat)).reply, ANSWERS.stockFetchFailed);
+  });
+  it("page unreadable -> safe fallback to thediscusden.com/available", async () => {
+    const r = await one("how many Blue Diamonds left?", brokenCatalog());
+    assert.equal(r.reply, ANSWERS.stockFetchFailed);
+    assert.match(r.reply, /thediscusden\.com\/available/);
+  });
+  it("availability is cached like prices: one page fetch per TTL, bundle once per hashed path", async () => {
+    let n = 0;
+    let t = 0;
+    const fetchImpl: FetchLike = async (url) => {
+      n += 1;
+      const body = url.endsWith("/available") ? AVAILABLE_HTML : url.endsWith("/assets/index-TEST123.js") ? SITE_BUNDLE_JS : null;
+      return body ? { ok: true, status: 200, text: async () => body } : { ok: false, status: 404, text: async () => "" };
+    };
+    const cat = createCatalogLoader({ fetch: fetchImpl, now: () => t });
+    await one("how many Blue Diamonds left?", cat);
+    await one("how many red ninja left?", cat);
+    assert.equal(n, 2);
+    t = 61_000;
+    assert.ok((await one("how many red ninja left?", cat)).reply.includes(": in stock right now."));
+    assert.equal(n, 3);
+  });
+  it("no mortality or supplier detail rides along", async () => {
+    assert.equal((await one("how many Blue Diamonds left and who is your supplier?")).reply, ANSWERS.noInternalFigures);
+    assert.equal((await one("how many Blue Diamonds left and how many died?")).reply, ANSWERS.lossSafetyNet);
+    for (const m of ["how many Blue Diamonds left?", "how many fish do you have in stock?"]) {
+      assert.doesNotMatch((await one(m)).reply, /supplier|breeder|farm|import|mortality|died|dead|loss/i, m);
+    }
+  });
+  it("mid-handoff: answers availability, then re-asks the pending question", async () => {
+    const r = (await chat(["Talk to Shiva", "how many Blue Diamonds left?"])).at(-1)!;
+    assert.ok(r.reply.includes(BIG));
+    assert.ok(r.reply.endsWith(ANSWERS.handoffAskName), r.reply);
+    assertNoQuantity(r.reply, "mid-handoff");
+  });
+  it("parseSiteStock / attachStock read only name+stock pairs (used for in/out only)", () => {
+    const m = parseSiteStock(SITE_BUNDLE_JS);
+    assert.equal(m.get(normName("Blue Diamonds (Big)")), 25);
+    assert.equal(m.has(normName("Red Cover Blue Face & Rim")), false);
+    assert.equal(findSiteBundlePath(AVAILABLE_HTML), "/assets/index-TEST123.js");
+    const cards = attachStock(parseAvailableHtml(AVAILABLE_HTML), m);
+    assert.equal(cards.find((c) => c.name === "Red Ninja Discus")!.stock, 15);
+    assert.equal(cards.find((c) => c.name.startsWith("Red Cover"))!.stock, undefined);
+  });
+  it("guard blocks any outgoing quantity phrasing", () => {
+    for (const bad of [
+      "Blue Diamonds: 25 in the Den right now.",
+      "We have 25 of them.",
+      "There are 8 left.",
+      "Only 3 left!",
+      "25 available today.",
+      "12 pieces ready to ship.",
+      "Stock: 30",
+      "qty is 15",
+      "about 20 in stock",
+      "20 fish available",
+      "6 remaining",
+    ]) {
+      assert.notEqual(guardReply(bad).text, bad, bad);
+    }
+    for (const ok of [BIG, "5% off for 5–9 fish, 10% off for 10 or more, applied in the cart.", "We can hold fish for up to 7 days free."]) {
+      assert.equal(guardReply(ok).text, ok, ok);
+    }
+  });
+});
+
+describe("LB-3: quarantine + ship -> Yes, quarantine, hold rule, then delivery", () => {
+  const CORE = `Yes. ${ANSWERS.quarantine} ${ANSWERS.holding}`;
+  for (const m of [
+    "I see - you guys quarantine the fish and ship it to me?",
+    "do you quarantine the fish before shipping?",
+    "so you hold the fish for some days and then send it?",
+    "will you keep the fish with you and deliver later?",
+    "quarantine panni anuppuveengala?",
+  ]) {
+    it(m, async () => {
+      const r = await one(m);
+      assert.equal(r.intent, "quarantine_ship", m);
+      assert.ok(r.reply.startsWith(CORE), r.reply);
+      assert.match(r.reply, /7 days free/);
+      assert.match(r.reply, /₹100 per day for the whole purchase/);
+      assert.ok(r.reply.endsWith(ANSWERS.shipInStates), r.reply);
+      assert.equal(guardReply(r.reply).text, r.reply, m);
+    });
+  }
+  it("delivery part follows the visitor's place (abroad -> FAQ 25)", async () => {
+    const r = await one("do you quarantine the fish and ship to Dubai?");
+    assert.ok(r.reply.startsWith(CORE));
+    assert.ok(r.reply.endsWith(ANSWERS.shipAbroad), r.reply);
+  });
+  it("long hold + ship keeps the LONG HOLD flag and Shiva's-call line", async () => {
+    const r = await one("can you hold my fish for a month and then ship it?");
+    assert.match(r.reply, /Anything beyond that is Shiva's call/);
+    assert.ok(r.state.flags.includes("LONG HOLD"));
+  });
+  it("plain delivery and plain quarantine questions are unchanged", async () => {
+    assert.equal((await one("Do you deliver to Kerala?")).reply, ANSWERS.shipInStates);
+    assert.equal((await one("Do you quarantine your fish?")).reply, ANSWERS.quarantine);
   });
 });

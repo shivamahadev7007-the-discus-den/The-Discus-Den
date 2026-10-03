@@ -6,7 +6,7 @@
  * than to exact text that includes live prices. Not used at runtime.
  */
 
-import { ANSWERS, PER_PIECE_LINE } from "./answers.ts";
+import { ANSWERS, ownerReply, PER_PIECE_LINE } from "./answers.ts";
 
 const FIXED: Array<[string, string]> = [
   [ANSWERS.lossSafetyNet, "FAQ 26"],
@@ -42,6 +42,7 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.beginnerIntro, "FAQ 3"],
   [ANSWERS.faqStrains, "FAQ 1"],
   [ANSWERS.noInternalFigures, "internal"],
+  [ANSWERS.stockFetchFailed, "C1 stock"],
   [ANSWERS.areYouHuman, "are-you-human"],
   [ANSWERS.welcome, "welcome"],
   [ANSWERS.careTips, "care-tips"],
@@ -82,6 +83,10 @@ export function faqIdOf(reply: string): string {
     if (core.length >= 20 && core !== text && first.startsWith(core)) return id;
   }
   if (first.startsWith(ANSWERS.availableIntro)) return "FAQ 1";
+  if (first.startsWith(ANSWERS.stockIntro)) return "C1 stock";
+  if (first.startsWith(`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine}`)) return "LB-3";
+  if (first.startsWith("•") && /: (in stock right now|out of stock right now|see \S+ for current availability)\.$/m.test(first)) return "C1 stock";
+  if (first.startsWith(ownerReply("").split(",")[0]!.trim())) return "B12 owner";
   if (first.startsWith("•")) return "FAQ 2";
   if (first.startsWith(`${ANSWERS.foodIntro} `)) return "FAQ 15";
   if (/^Goat Heart Mix\b/.test(first)) return "FAQ 16";

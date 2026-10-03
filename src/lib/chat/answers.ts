@@ -117,6 +117,13 @@ export const ANSWERS = {
     "Every fish is quarantined, fed and watched before it leaves. We hold them until they're ready, and Shiva would rather refuse a shipment than send a stressed fish.",
   holding:
     "We can hold fish for up to 7 days free. After that there's a maintenance charge of ₹100 per day for the whole purchase, not per fish.",
+  /**
+   * LB-3 (Shiva, 3 Oct): "you quarantine the fish and ship it to me?" is a plain
+   * factual question, so this combined answer opens with "Yes." (the only
+   * exemption from the no-"Yes"-opener audit), then FAQ 13 + FAQ 14 verbatim,
+   * then the delivery answer for the visitor's place (FAQ 5 / 25).
+   */
+  quarantineShipYes: "Yes.",
   holdingBeyond: "Anything beyond that is Shiva's call. Shall I pass your details?",
   foodIntro: "We have",
   foodOutro: "See thediscusden.com/in-the-den.",
@@ -140,7 +147,19 @@ export const ANSWERS = {
     "Every fish is quarantined, fed and watched before it leaves, and Shiva only ships fish that are eating and settled. Happy to pass any detailed questions to him.",
   /** FAQ 22: claimed promises or offers. Takes priority over FAQ 14 (holding) and FAQ 19 (discounts). */
   claimedOffer: "I can't confirm or apply that here. Shiva will check it with you personally. Shall I pass your details to him?",
-  /** Rule 1/2/3: no stock figures, losses or sources. Not verbatim in the pack. */
+  /**
+   * C1 (Shiva's ruling, 3 Oct): availability only. The bot says whether a card
+   * is in or out of stock, as the live site shows it, and NEVER how many.
+   * Lines are built per card in engine.ts; these are the fixed parts.
+   */
+  stockPage: "thediscusden.com/available",
+  stockIntro: "Here's what the site shows as in stock right now:",
+  stockOutro:
+    "Availability is as shown on thediscusden.com/available right now. Shiva confirms quantities with you personally. Want me to pass your details to him?",
+  stockListOutro: "Full list: thediscusden.com/available\nWant me to narrow it down by size or colour?",
+  stockFetchFailed:
+    "I can't load live availability right now. You can check thediscusden.com/available. Or I can pass your question to Shiva.",
+  /** Rule 1/2/3: no loss figures or sources (not on the site). Not verbatim in the pack. */
   noInternalFigures:
     "I can't share that here. Our available page shows what's ready now: thediscusden.com/available. Want me to narrow it down by size or colour?",
   /** FAQ 24: "If still unclear" clarifying question (never just "I'm not sure"). */
@@ -168,6 +187,12 @@ export const ANSWERS = {
   serverError:
     "Sorry, I'm having trouble right now. Please try again in a moment, or see thediscusden.com/available.",
 } as const;
+
+/** B12 (3 Oct rule): the owner's name as the site footer shows it. Never a number. */
+export const OWNER_FALLBACK = "Shiva";
+export function ownerReply(owner: string): string {
+  return `The Discus Den is run by ${owner}, here in Chennai, as shown on our website. He reads every handoff personally. Want me to pass your details to him?`;
+}
 
 /** Lead flags, as named in section 3 of the pack. */
 export type LeadFlag =

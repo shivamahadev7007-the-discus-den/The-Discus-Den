@@ -8,11 +8,16 @@
  * failure the loader returns null and the router replies with the pack's
  * fallback pointing to /available. It never guesses.
  *
- * Only name, size, one-line description and price are read. Nothing else on
- * the page (cart quantity controls etc.) is used.
+ * Read from the page: name, size, one-line description and price per card,
+ * plus the owner name printed in the site footer. Stock values come from the
+ * same strain list the /available page renders: the site's own client bundle,
+ * where each card's quantity stepper is capped at its `stock`. They are used
+ * ONLY to say in stock / out of stock (Shiva's ruling, 3 Oct: never a
+ * quantity). A value is attached only when the bundle lists that exact card
+ * name; otherwise it stays undefined and the bot points to /available.
  */
 
-import { AVAILABLE_URL, FROZEN_URL, PELLETS_URL } from "./answers.ts";
+import { AVAILABLE_URL, FROZEN_URL, PELLETS_URL, SITE_URL } from "./answers.ts";
 
 export type StrainCard = {
   name: string;
@@ -23,7 +28,11 @@ export type StrainCard = {
   /** Exactly as shown on the card, e.g. "₹3,250". */
   priceText: string;
   available: boolean;
+  /** Pieces the site lists for this card (its qty cap). Undefined = not listed / couldn't read. */
+  stock?: number;
 };
+
+export type SiteInfo = { owner: string | null };
 
 export type FoodPack = { size: string; price: number; priceText: string };
 export type FoodItem = { name: string; description: string; packs: FoodPack[] };
@@ -137,6 +146,56 @@ export function parseAvailableHtml(html: string): StrainCard[] {
   return out;
 }
 
+/** URL path of the site's main client bundle, referenced from every page. */
+export function findSiteBundlePath(html: string): string | null {
+  const m = /\/assets\/index-[A-Za-z0-9_-]+\.js/.exec(html);
+  return m ? m[0] : null;
+}
+
+/**
+ * Stock per card name, from the site bundle's strain list: objects like
+ * {id:`blue-diamond`,name:`Blue Diamonds (Big)`,...,price:3750,stock:25}.
+ * Only objects that carry both a name and an integer stock are read.
+ */
+export function parseSiteStock(js: string): Map<string, number> {
+  const out = new Map<string, number>();
+  const re = /\bname:\s*(?:`([^`]{1,80})`|"([^"]{1,80})"|'([^']{1,80})')[^{}]*?\bstock:\s*(\d{1,4})\b/g;
+  for (const m of js.matchAll(re)) {
+    const name = (m[1] ?? m[2] ?? m[3] ?? "").trim();
+    const n = Number(m[4]);
+    if (name && Number.isInteger(n) && !out.has(normName(name))) out.set(normName(name), n);
+  }
+  return out;
+}
+
+export function normName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** Attach site-listed stock to cards by exact (normalised) card name. */
+export function attachStock(cards: StrainCard[], stock: Map<string, number> | null): StrainCard[] {
+  if (!stock || stock.size === 0) return cards;
+  return cards.map((c) => {
+    const n = stock.get(normName(c.name));
+    return n === undefined ? c : { ...c, stock: n };
+  });
+}
+
+/**
+ * Owner name as printed in the site footer:
+ * "The Discus Den | <Owner> | Chennai | GSTIN : ...". Returns null when the
+ * footer doesn't have that shape (the bot then uses its standing name).
+ */
+export function parseOwnerName(html: string): string | null {
+  const segs = segments(html.replace(/<article\b[\s\S]*?<\/article>/gi, " "));
+  const g = segs.findIndex((s) => /^GSTIN\b/i.test(s));
+  if (g < 2) return null;
+  const cand = segs[g - 2]!;
+  if (!/^\p{Lu}[\p{L}.']{1,30}(?: \p{Lu}[\p{L}.']{0,30}){0,2}$/u.test(cand)) return null;
+  if (/discus|den|chennai|gstin/i.test(cand)) return null;
+  return cand;
+}
+
 const PACK_RE = /^\d+(?:\.\d+)?\s?(?:g|kg|gm|gms|ml|l)$/i;
 
 export function parseFoodHtml(html: string): FoodItem[] {
@@ -177,7 +236,7 @@ async function fetchHtml(url: string, fetchImpl: FetchLike): Promise<string | nu
   try {
     const res = await fetchImpl(url, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      headers: { "user-agent": "TheDiscusDen-ChatAssistant/1.0", accept: "text/html" },
+      headers: { "user-agent": "TheDiscusDen-ChatAssistant/1.0", accept: "text/html, */*;q=0.8" },
     });
     if (!res.ok) return null;
     return await res.text();
@@ -204,6 +263,8 @@ async function cached<T>(
 
 export type CatalogLoader = {
   strains(): Promise<StrainCard[] | null>;
+  /** Owner name etc. read from the site; optional so simple test loaders can omit it. */
+  site?(): Promise<SiteInfo | null>;
   foods(): Promise<{ frozen: FoodItem[] | null; pellets: FoodItem[] | null }>;
 };
 
@@ -214,6 +275,20 @@ export function createCatalogLoader(opts?: { fetch?: FetchLike; now?: () => numb
   // One cache per loader; the API route creates a single loader per warm
   // serverless instance, so the cache lives as long as the instance.
   const store: Cache = new Map();
+  // The bundle URL is content-hashed (a stock change on the site ships a new
+  // file name), so a parsed bundle is kept per path. Failed reads aren't kept.
+  const bundles = new Map<string, Map<string, number>>();
+  const bundleStock = async (path: string | null): Promise<Map<string, number> | null> => {
+    if (!path) return null;
+    const hit = bundles.get(path);
+    if (hit) return hit;
+    const js = await fetchHtml(`${SITE_URL}${path}`, fetchImpl);
+    if (!js) return null;
+    const stock = parseSiteStock(js);
+    if (bundles.size >= 4) bundles.clear();
+    bundles.set(path, stock);
+    return stock;
+  };
   return {
     strains: () =>
       cached(
@@ -225,7 +300,24 @@ export function createCatalogLoader(opts?: { fetch?: FetchLike; now?: () => numb
           if (!html) return null;
           const cards = parseAvailableHtml(html).filter((c) => c.name);
           // A page we can't read must never be mistaken for "nothing available".
-          return cards.length ? cards : null;
+          if (!cards.length) return null;
+          const owner = parseOwnerName(html);
+          if (owner) store.set("site", { at: now(), data: { owner } satisfies SiteInfo });
+          // Counts are best effort: if the bundle can't be read, cards simply
+          // carry no stock and the bot points to /available for counts.
+          return attachStock(cards, await bundleStock(findSiteBundlePath(html)));
+        },
+        now,
+      ),
+    site: () =>
+      cached(
+        store,
+        ttlMs,
+        "site",
+        async () => {
+          const html = await fetchHtml(AVAILABLE_URL, fetchImpl);
+          const owner = html ? parseOwnerName(html) : null;
+          return owner ? { owner } : null;
         },
         now,
       ),
