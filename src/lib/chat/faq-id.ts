@@ -6,7 +6,7 @@
  * than to exact text that includes live prices. Not used at runtime.
  */
 
-import { ANSWERS, OUT_OF_AREA_LEAD, ownerReply, PER_PIECE_LINE } from "./answers.ts";
+import { ANSWERS, HUMAN_PUSH_FIRM, OUT_OF_AREA_LEAD, ownerReply, PER_PIECE_LINE } from "./answers.ts";
 
 const FIXED: Array<[string, string]> = [
   [ANSWERS.lossSafetyNet, "FAQ 26"],
@@ -44,6 +44,9 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.noInternalFigures, "internal"],
   [ANSWERS.humanPush, "LB-6 steer"],
   [ANSWERS.humanPushShort, "LB-6 steer"],
+  ...HUMAN_PUSH_FIRM.map((t): [string, string] => [t, "LB-15 firm"]),
+  [ANSWERS.welcomeGreeting, "welcome"],
+  [ANSWERS.welcomeNewHobbyist, "welcome-new"],
   [ANSWERS.unlistedFirm, "LB-5 firm"],
   [ANSWERS.orderInChat, "LB-6 order via site"],
   [ANSWERS.orderReceived, "LB-6 request placed"],
@@ -56,6 +59,7 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.careTips, "care-tips"],
   [ANSWERS.liveFetchFailed, "live-fetch-failed"],
   [ANSWERS.thanks, "thanks"],
+  [ANSWERS.youreWelcome, "thanks"],
   [ANSWERS.bye, "bye"],
   [ANSWERS.handoffAskName, "handoff:name"],
   [ANSWERS.handoffPhoneRetry, "handoff:phone"],

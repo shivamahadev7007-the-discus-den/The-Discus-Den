@@ -141,6 +141,19 @@ export const ANSWERS = {
   humanPushShort:
     "All the details are on thediscusden.com. To order, choose your fish on thediscusden.com/available, then open the Shopping Bag, tap Finalize and Place request. Shiva is notified as soon as your request is placed and will take it from there.",
   /**
+   * LB-15 (Shiva, 3 Oct 12:49 PM): 3rd push to reach Shiva onward. [0] is Shiva's
+   * wording with the form named; the rest rotate from the 4th push so no two
+   * replies in a row are the same. Never a handoff.
+   */
+  humanPushFirm:
+    "Understood. Kindly place your requirement on thediscusden.com and fill in the form (Shopping Bag, then Finalize and Place request). All your questions and concerns will be handled by the owner, Shiva, once he is notified. We appreciate your cooperation.",
+  humanPushFirm2:
+    "I understand, and I appreciate your patience. Please add your requirement to the Shopping Bag on thediscusden.com, tap Finalize, fill in the form and tap Place request. Shiva is notified straight away and will personally handle all your questions.",
+  humanPushFirm3:
+    "I hear you. Shiva looks after every customer himself once your request reaches him. Kindly fill in the form on thediscusden.com (Shopping Bag, Finalize, Place request) with your requirement and any questions, and he'll take it from there. Thank you for understanding.",
+  humanPushFirm4:
+    "Thank you for bearing with me. Placing your requirement through the form on thediscusden.com (Shopping Bag, then Finalize and Place request) is how Shiva gets notified, and he will answer all your concerns personally. We appreciate your cooperation.",
+  /**
    * LB-6 SOP (Shiva, 3 Oct) for first-timers and orders outside Chennai (not
    * store pickup). Default flow; the 7-days-free / ₹100-a-day line is only for
    * customers who ask us to keep fish longer. Payment method only, never a number.
@@ -249,6 +262,12 @@ export const ANSWERS = {
     "Everything is on thediscusden.com and it's self-explanatory. Once you place a request from the Shopping Bag, Shiva is notified and takes it from there.",
   /** FAQ 25: delivery abroad. Hand off; flags OUTSIDE 8 STATES + REMOTE. Never promise international shipping. */
   thanks: "You're welcome. Anything else I can help with?",
+  /** LB-13: pleasantries get a warm line, then the fish-or-food question (engine). */
+  welcomeGreeting:
+    "Hello, and welcome to The Discus Den. Our discus are raised, quarantined and held here until they're ready.",
+  welcomeNewHobbyist:
+    "Welcome to The Discus Den, and welcome to the discus hobby. Every fish here is raised, quarantined and held until it's ready, which helps a new keeper start well.",
+  youreWelcome: "You're welcome.",
   bye: "Thank you for visiting The Discus Den. Take care.",
 
   // Transport-level replies (http.ts)
@@ -260,6 +279,9 @@ export const ANSWERS = {
   serverError:
     "Sorry, I'm having trouble right now. Please try again in a moment, or see thediscusden.com/available.",
 } as const;
+
+/** LB-15: the 3rd-push reply and its rotation (4th push onward). */
+export const HUMAN_PUSH_FIRM: readonly string[] = [ANSWERS.humanPushFirm, ANSWERS.humanPushFirm2, ANSWERS.humanPushFirm3, ANSWERS.humanPushFirm4];
 
 /** B12 (3 Oct rule): the owner's name as the site footer shows it. Never a number. */
 export const OWNER_FALLBACK = "Shiva";

@@ -363,3 +363,26 @@ describe("LB-11 + LB-7 · lead email: fish-or-food, never pair/single", () => {
     });
   }
 });
+
+describe("LB-13/14/15 · pushes and pleasantries never email; a genuine handoff still emails once", () => {
+  const deps = (fetchImpl: AlertFetch) => ({
+    store: createMemoryChatStore(),
+    catalog: offlineCatalog(),
+    env: EMAIL_ENV,
+    sendAlert: (l: LeadForAlert, t: TranscriptLine[]) => sendLeadAlert(l, t, EMAIL_ENV, fetchImpl),
+  });
+  it("greetings + 5 pushes (with a name and number typed) send no email", async () => {
+    const { calls, fetchImpl } = recorder();
+    const out = await runChat(deps(fetchImpl), ["hi", "fish", "Connect to Shiva", "can I talk to the owner", "Ravi", "9845012345", "please connect me with him", "put me through", "get me the owner", "thanks", "bye"], "3f2b8c1e-9a4d-4e2f-8b6a-00000000b150");
+    assert.ok(out.every((o) => o.status === 200 && !o.handoff));
+    assert.equal(calls.length, 0);
+  });
+  it("after a greeting and 3 pushes, a genuine visit handoff emails exactly once, with the fish-or-food answer", async () => {
+    const { calls, fetchImpl } = recorder();
+    await runChat(deps(fetchImpl), ["hello", "Discus fish", "Connect to Shiva", "contact the owner", "conect to shiva", "Can I visit the store?", "yes", "Ravi", "9845012345", "Chennai", "I'll visit", "ready now", "thank you", "bye"], "3f2b8c1e-9a4d-4e2f-8b6a-00000000b152");
+    assert.equal(calls.length, 1);
+    const body = JSON.parse(String(calls[0]!.init.body));
+    assert.match(body.text, /Looking for: Discus fish\b/);
+    assert.doesNotMatch(body.text, /pair\s*\/\s*single/i);
+  });
+});

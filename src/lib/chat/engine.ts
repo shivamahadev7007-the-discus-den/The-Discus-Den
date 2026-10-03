@@ -13,6 +13,7 @@
 
 import {
   ANSWERS,
+  HUMAN_PUSH_FIRM,
   OWNER_FALLBACK,
   outOfAreaReply,
   ownerReply,
@@ -61,7 +62,7 @@ export type ChatState = {
   v: 1;
   turns: number;
   /** What the last bot reply offered: a handoff, or narrowing the list. */
-  pendingOffer: "handoff" | "narrow" | null;
+  pendingOffer: "handoff" | "narrow" | "lookingFor" | null;
   handoff: {
     active: boolean;
     step?: HandoffStep;
@@ -88,6 +89,10 @@ export type ChatState = {
    * "claim" (DOA / sick / mortality: no fish-or-food question), "fish" (already about fish).
    */
   handoffKind?: "claim" | "fish";
+  /** LB-13: fish-or-food answer given after a pleasantry (prefills a later handoff; not a lead by itself). */
+  lookingForHint?: string;
+  /** LB-13: the fish-or-food question was already asked after a pleasantry this session. */
+  askedLookingFor?: boolean;
 };
 
 export function newChatState(): ChatState {
@@ -631,6 +636,8 @@ function join(...parts: Array<string | undefined>): string {
 function applyHandoffKind(state: ChatState, kind: ChatState["handoffKind"]): void {
   state.handoff.skip = kind === "claim" ? ["lookingFor"] : [];
   if (kind === "fish") state.lead.lookingFor ??= LOOKING_FISH;
+  // LB-13: already answered after a greeting -> don't ask again.
+  if (kind !== "claim" && state.lookingForHint && state.lookingForHint !== "not sure") state.lead.lookingFor ??= state.lookingForHint;
 }
 
 function startHandoff(state: ChatState, raw: string, prefix?: string, kind: ChatState["handoffKind"] = state.handoffKind): Turn {
@@ -946,6 +953,126 @@ const HUMAN_PUSH = new RegExp(
     String.raw`\b(owner|shiva|ungal\s+owner|anna)\s+kitta\s+(pesa\w*|pesu\w*|connect|call)\b|\b(owner|shiva)\s+(number|contact)\s+(kudunga|kudu|venum|tharunga|anuppunga)\b|\b(pesanum|pesa\s+venum|pesa\s+mudiyuma|pesalama|pesunga)\b|\bcall\s+(pannunga|pannu|panna\s+mudiyuma|pannalama)\b|\b(aal|aalu|manushan)\s+(venum|kitta)\b`,
   ].join("|"),
 );
+// ---------------------------------------------------------------------------
+// LB-14 (Shiva, 3 Oct): "Connect to Shiva", "put me through", "get me the owner",
+// "how do I contact the owner"... with typos ("conect", "speek", "tlak").
+// ---------------------------------------------------------------------------
+const REACH_TARGET = new Set(["shiva", "siva", "shivaa", "sivaa", "owner", "ownr", "onwer", "owener", "someone", "somebody", "anyone", "anybody", "person", "human", "humans", "manager", "him", "staff", "boss", "agent", "proprietor", "team"]);
+const REACH_LONG = ["connect", "contact", "speak", "reach"];
+const REACH_SHORT = ["talk", "call", "ring", "ping", "phone"];
+/** Verbs whose object may be "you" ("how can I contact you"); "talk to you about tanks" is not a push. */
+const REACH_YOU = new Set(["connect", "contact", "reach", "call", "phone", "ring"]);
+
+/** Damerau-Levenshtein distance (words are short, so this stays fast). */
+function editDistance(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 1) return 2;
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0]![j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+    }
+  }
+  return d[a.length]![b.length]!;
+}
+function sortedLetters(w: string): string {
+  return [...w].sort().join("");
+}
+/** The reach verb a word stands for: exact, one typo for long verbs, a swapped pair for short ones ("tlak"). */
+function reachVerb(w: string): string | null {
+  const base = w.replace(/(ing|ed|s)$/, "");
+  for (const v of [...REACH_LONG, ...REACH_SHORT]) if (w === v || base === v) return v;
+  if (w.length >= 4) for (const v of REACH_LONG) if (editDistance(w, v) <= 1 || editDistance(base, v) <= 1) return v;
+  for (const v of REACH_SHORT) if (w.length === v.length && w !== v && sortedLetters(w) === sortedLetters(v) && editDistance(w, v) === 1) return v;
+  return null;
+}
+const REACH_PHRASE =
+  /\bput\s+(me|us)\s+through\b|\bget\s+(me|us)\s+(through\s+to\s+|to\s+)?(the\s+|a\s+|an\s+|some\s+)?(shiva|siva|owner|someone|somebody|person|human|manager|boss|staff|him|real\s+person)\b|\b(get|be|keep)\s+in\s+touch\b|^(shiva|siva)(\s+(please|pls|plz|sir|anna|now))?$|^(the\s+)?(owner|human|a\s+human|real\s+person|manager|a\s+person)\s+(please|pls|plz|now)$/;
+/** An explicit person in the message (used to keep "can I call to visit the store" on the visit answer). */
+const PERSON_WORD = /\b(shiva|siva|owner|someone|somebody|anyone|person|human|manager|him|staff|boss|agent)\b/;
+
+/** LB-14: an ask to reach Shiva / a person that the LB-6 patterns miss. */
+export function isReachAsk(t: string): boolean {
+  if (REACH_PHRASE.test(t)) return true;
+  const words = t.replace(/[^a-z' ]/g, " ").split(/\s+/).filter(Boolean);
+  for (let i = 0; i < words.length; i++) {
+    const verb = reachVerb(words[i]!);
+    if (!verb) continue;
+    for (const w of words.slice(i + 1, i + 6)) {
+      if (REACH_TARGET.has(w.replace(/'s$/, ""))) return true;
+      if ((w === "you" || w === "u") && REACH_YOU.has(verb)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * LB-15 (Shiva, 3 Oct 12:49 PM): 1st push = full steer, 2nd = short steer, 3rd = the
+ * polite "Understood. Kindly place your requirement..." reply, 4th+ = rotate its variants.
+ * Never the same reply twice in a row; never a handoff.
+ */
+function pushReply(state: ChatState): string {
+  const n = (state.humanPushes = (state.humanPushes ?? 0) + 1);
+  if (n === 1) return ANSWERS.humanPush;
+  if (n === 2) return ANSWERS.humanPushShort;
+  return HUMAN_PUSH_FIRM[(n - 3) % HUMAN_PUSH_FIRM.length]!;
+}
+
+// ---------------------------------------------------------------------------
+// LB-13: pleasantries (greeting / thanks / bye / "I'm new") on their own.
+// A pleasantry with a real question ("hi, price of blue diamond?") is not one.
+// ---------------------------------------------------------------------------
+type Pleasantry = "greeting" | "thanks" | "bye" | "new";
+const PLEASANTRY: Array<[Pleasantry, RegExp]> = [
+  ["bye", /\b(bye(\s+bye)?|byee+|goodbye|good\s+bye|see\s+(you|u|ya)(\s+(later|soon|again))?|good\s*night|tata|take\s+care|catch\s+you\s+later|cya)\b/g],
+  ["thanks", /\b(thanks?(\s+(a\s+lot|so\s+much|very\s+much|again|a\s+ton))?|thank\s+(you|u)(\s+(so|very)\s+much|\s+a\s+lot)?|thanku|thankyou|thx|thnx|thanx|tnx|ty|nandri|dhanyavad|shukriya|much\s+appreciated|appreciate\s+it)\b/g],
+  ["new", /\b((i'?m|i\s+am|im|am)\s+(a\s+|an\s+)?(new|beginner|newbie|novice|fresher|starter)(\s+(discus\s+)?(hobbyist|keeper|aquarist|fish\s*keeper|here|to\s+(the\s+)?(discus|hobby|fishkeeping|fish\s+keeping|this\s+hobby|discus\s+keeping)))?|(new|beginner|newbie|novice)\s+(discus\s+)?(hobbyist|keeper|aquarist|fish\s*keeper)(\s+here)?|(beginner|newbie)\s+here|just\s+(started|starting|getting\s+started)(\s+with\s+discus)?)\b/g],
+  ["greeting", /\b(hi+|hello+|helo|hey+|hai|hiya|heya|howdy|vanakkam|namaste|namaskaram|namaskar|good\s+(morning|afternoon|evening|day)|gm|hola|greetings)\b/g],
+];
+const PLEASANTRY_FILLER =
+  /\b(there|sir|madam|mam|maam|team|shiva|siva|anna|bro|all|everyone|guys|folks|friend|friends|dear|ji|ok|okay|oh|so|and|very|much|again|the|discus|den|from|here|just|a|an|to|you|too|i|am|im|i'm|really|nice|great|cool|lovely|wonderful)\b/g;
+
+/** LB-13: which pleasantry this message is, if it is nothing but pleasantries. */
+export function pleasantryOnly(t: string): Pleasantry | null {
+  let rest = t;
+  const kinds = new Set<Pleasantry>();
+  for (const [kind, re] of PLEASANTRY) {
+    rest = rest.replace(re, () => {
+      kinds.add(kind);
+      return " ";
+    });
+  }
+  if (!kinds.size) return null;
+  rest = rest.replace(PLEASANTRY_FILLER, " ").replace(/[^a-z0-9]+/g, "");
+  if (rest) return null;
+  for (const k of ["bye", "new", "thanks", "greeting"] as const) if (kinds.has(k)) return k;
+  return null;
+}
+
+function pleasantryReply(state: ChatState, kind: Pleasantry): Turn {
+  state.pendingOffer = null;
+  // Bye: just a warm goodbye (a question would read oddly as they leave).
+  if (kind === "bye") return { reply: ANSWERS.bye, intent: "bye" };
+  const known = state.askedLookingFor || state.lookingForHint || state.lead.lookingFor || state.handoff.active;
+  const lead = kind === "new" ? ANSWERS.welcomeNewHobbyist : kind === "thanks" ? ANSWERS.youreWelcome : ANSWERS.welcomeGreeting;
+  const intent = kind === "new" ? "welcome_new" : kind === "thanks" ? "thanks" : "welcome";
+  if (known) {
+    return { reply: kind === "thanks" ? ANSWERS.thanks : kind === "new" ? `${ANSWERS.welcomeNewHobbyist} How can I help?` : ANSWERS.welcome, intent };
+  }
+  state.askedLookingFor = true;
+  state.pendingOffer = "lookingFor";
+  return { reply: `${lead} ${ANSWERS.handoffAskLookingFor}`, intent };
+}
+
+/** LB-13: the answer to the fish-or-food question asked after a pleasantry. */
+function lookingForAnswer(t: string): string | null {
+  if (t.split(" ").length > 6 || /\?/.test(t)) return null;
+  const v = parseLookingFor(t);
+  return v && (lookingForPointer(v) || v === "not sure") ? v : null;
+}
+
 /** LB-6 B3: "can I order on chat itself?" -> No, orders go through the site. */
 const ORDER_IN_CHAT =
   /\b(order|buy|book|purchase|reserve)\s+(it\s+|them\s+|fish\s+)?(on|in|through|via|over|using|from)\s+(the\s+|this\s+)?(chat|chatbot|bot|whatsapp|here)\b|\b(can|could|may|do)\s+(i|we)\s+(just\s+)?(order|buy|book|purchase)\s+(here|right\s+here|now\s+here|from\s+you\s+here)\b|\b(can|could|will)\s+(you|u)\s+(take|book|place|note)\s+(my|the|an|our)\s+order\b|\b(take|book|place)\s+(my|the|an)\s+order\s+(here|on\s+chat|in\s+chat|via\s+chat)\b|\bchat\s+(itself|la\s+order|mein\s+order)\b|\bchat\s+(la|le|mein|me)\s+(order|book)\w*/;
@@ -1026,7 +1153,7 @@ function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean } = {
 //   6. fallback - FAQ 24 clarifying question (never "I'm not sure").
 // ---------------------------------------------------------------------------
 
-type Msg = { state: ChatState; raw: string; t: string; ctx: Ctx; offTopic: boolean };
+type Msg = { state: ChatState; raw: string; t: string; ctx: Ctx; offTopic: boolean; lookingForPending?: boolean };
 type RuleTier = "safety" | "offer" | "faq" | "smalltalk" | "offtopic" | "fallback";
 type IntentRule = {
   id: string;
@@ -1324,8 +1451,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
     // LB-6 A4: "is this a bot? I want a real person" -> who we are + the site steer.
     run: ({ state }) => {
       state.pendingOffer = null;
-      state.humanPushes = (state.humanPushes ?? 0) + 1;
-      return { reply: `${ANSWERS.areYouHuman} ${state.humanPushes > 1 ? ANSWERS.humanPushShort : ANSWERS.humanPush}`, intent: "are_you_human" };
+      return { reply: `${ANSWERS.areYouHuman} ${pushReply(state)}`, intent: "are_you_human" };
     },
   },
   {
@@ -1333,11 +1459,13 @@ export const INTENT_RULES: readonly IntentRule[] = [
     // site (order via the Shopping Bag; Shiva is notified on Place request).
     // No handoff, no name/number collection; repeats get a shorter steer.
     id: "talk_to_shiva", tier: "safety", faq: "LB-6: steer to site",
-    test: (m) => RE.talkToShiva.test(m.t) || HUMAN_PUSH.test(m.t),
+    // LB-14: plus connect / reach / contact / "put me through" / "get me the owner" (typos too).
+    // "can I call to visit the store" (no person named) stays on the visit answer.
+    test: (m) => (RE.talkToShiva.test(m.t) || HUMAN_PUSH.test(m.t) || isReachAsk(m.t)) && !(RE.visit.test(m.t) && !PERSON_WORD.test(m.t)),
     run: ({ state }) => {
       state.pendingOffer = null;
-      state.humanPushes = (state.humanPushes ?? 0) + 1;
-      return { reply: state.humanPushes > 1 ? ANSWERS.humanPushShort : ANSWERS.humanPush, intent: "human_push" };
+      // LB-15: 3rd push onward gets the polite "place your requirement" reply, rotated.
+      return { reply: pushReply(state), intent: "human_push" };
     },
   },
 
@@ -1358,7 +1486,25 @@ export const INTENT_RULES: readonly IntentRule[] = [
     run: ({ state }) => { state.pendingOffer = "narrow"; return { reply: "Sure. Which size or colour would you like?", intent: "narrow_ask" }; },
   },
 
+  {
+    // LB-13: answer to "Discus fish or Discus frozen foods?" asked after a pleasantry.
+    id: "looking_for_answer", tier: "offer", faq: "LB-13: fish or food",
+    test: (m) => m.lookingForPending === true && lookingForAnswer(m.t) !== null,
+    run: ({ state, t }) => {
+      const v = lookingForAnswer(t)!;
+      state.lookingForHint = v;
+      state.pendingOffer = null;
+      return { reply: lookingForPointer(v) ?? ANSWERS.lookingForBoth, intent: "looking_for" };
+    },
+  },
+
   // ---- 3. FAQs ----
+  {
+    // LB-13: greetings, thanks, bye and "I'm new" on their own (first-timer order questions keep the SOP).
+    id: "pleasantry", tier: "faq", faq: "LB-13: pleasantry",
+    test: (m) => pleasantryOnly(m.t) !== null && !FIRST_TIMER.test(m.t),
+    run: ({ state, t }) => pleasantryReply(state, pleasantryOnly(t)!),
+  },
   {
     // LB-6 B3 (Lea, 3 Oct): orders never happen in the chat.
     id: "order_in_chat", tier: "faq", faq: "LB-6: order via site",
@@ -1539,8 +1685,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
     test: (m) => extractIndianMobile(m.raw) !== null,
     run: ({ state }) => {
       state.pendingOffer = null;
-      state.humanPushes = (state.humanPushes ?? 0) + 1;
-      return { reply: state.humanPushes > 1 ? ANSWERS.humanPushShort : ANSWERS.humanPush, intent: "contact_typed_steer" };
+      return { reply: pushReply(state), intent: "contact_typed_steer" };
     },
   },
   {
@@ -1623,7 +1768,8 @@ function handoffKindOf(intent: string): ChatState["handoffKind"] {
 
 /** Normal (non-handoff) routing: first matching rule in INTENT_RULES wins. */
 async function routeIntent(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
-  const m: Msg = { state, raw, t, ctx, offTopic: isOffTopic(t) };
+  const m: Msg = { state, raw, t, ctx, offTopic: isOffTopic(t), lookingForPending: state.pendingOffer === "lookingFor" };
+  if (m.lookingForPending) state.pendingOffer = null;
   for (const rule of INTENT_RULES) {
     if (rule.tier === "faq" && m.offTopic) continue;
     if (!rule.test(m)) continue;
@@ -1686,7 +1832,7 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
   if (interrupt || (!answered && !RE.declineField.test(t))) {
     const probe = newProbe(state);
     const r = await routeIntent(probe, raw, t, ctx);
-    const generic = ["unsure", "unclear", "off_topic", "ack", "welcome", "thanks"].includes(r.intent);
+    const generic = ["unsure", "unclear", "off_topic", "ack", "welcome", "welcome_new", "thanks", "looking_for"].includes(r.intent);
     const isCity = step === "city"; // free-text city names fall through to accept below
     if (!generic && !(isCity && r.intent === "off_topic")) {
       // Keep flags/tags/interests learnt from the probe, but stay in the handoff.
