@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ANSWERS, deliveryTimingFor, firmPushReply, FIRM_CLOSINGS, HUMAN_PUSH_FIRM, OUT_OF_AREA_LEAD, outOfAreaReply, SITE_STEPS, VOLUME_DISCOUNT_LINE } from "./answers.ts";
 import { attachStock, createCatalogLoader, findSiteBundlePath, normName, parseAvailableHtml, parseFoodHtml, parseOwnerName, parseSiteStock, priceCacheMsFromEnv, type CatalogLoader, type FetchLike } from "./catalog.ts";
-import { extractIndianMobile, isReachAsk, matchStrains, parseName, pleasantryOnly, respond, type ChatState } from "./engine.ts";
+import { extractIndianMobile, isReachAsk, matchStrains, parseName, pleasantryOnly, respond, timingNorm, type ChatState } from "./engine.ts";
 import { guardReply } from "./guard.ts";
 import { ALERT_CAPS, handleChatRequest, handleOptions, RATE_LIMITS } from "./http.ts";
 import { formatLeadAlert, type LeadForAlert, type TranscriptLine } from "./lead-alert.ts";
@@ -2516,5 +2516,92 @@ describe("LB-18: delivery timing", () => {
     const t = await viaHandoff(["Ravi", "fish", "9845012345", "Chennai", "when will the fish reach me?"]);
     assert.ok(t.at(-1)!.reply.endsWith(ANSWERS.handoffAskDelivery));
     assert.ok(t.at(-1)!.reply.startsWith(ANSWERS.deliveryTiming));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Kiara's quick test of 25a82a7 (lb-quick-25a82a7-2026-10-03.md): misspelt timing asks.
+// ---------------------------------------------------------------------------
+describe("Kiara 25a82a7: LB-18 typos and short forms", () => {
+  const GENERAL = `${ANSWERS.deliveryTiming}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`;
+  const placeReply = (p: string) => `${deliveryTimingFor(p)}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`;
+  // Her 16 phrasings, verbatim: [message, expected reply]
+  const KIARA: Array<[string, string]> = [
+    ["wen will fish reach me", GENERAL],
+    ["delivry time to bangalore", placeReply("Bangalore")],
+    ["how mny days to hyderabad", placeReply("Hyderabad")],
+    ["hw long shiping to kochi", placeReply("Kochi")],
+    ["delivary time", GENERAL],
+    ["how lng to pune", placeReply("Pune")],
+    ["wen will it arive", GENERAL],
+    ["shiping time to mumbai", placeReply("Mumbai")],
+    ["how many dys to kochi", placeReply("Kochi")],
+    ["when will fish reech bangalore", placeReply("Bangalore")],
+    ["fish reach when?", GENERAL],
+    ["when fish come", GENERAL],
+    ["when wil my fish reach", GENERAL],
+    ["how long delivery", GENERAL],
+    ["how many days delivery", GENERAL],
+    ["delivery tym to chennai", ANSWERS.deliveryTimingChennai],
+  ];
+  for (const [m, reply] of KIARA) {
+    it(`Kiara: '${m}'`, async () => {
+      const r = await one(m);
+      assert.ok(r.intent.startsWith("delivery_timing"), `${m} -> ${r.intent}`);
+      assert.equal(r.reply, reply);
+      assert.doesNotMatch(r.reply, /didn't catch/);
+    });
+  }
+  it("'delivery tym to chennai' = 'delivery time to Chennai'", async () => {
+    assert.equal((await one("delivery tym to chennai")).reply, (await one("delivery time to Chennai")).reply);
+  });
+  const MORE = [
+    "how many day reach", "dlvry tym?", "wen wil it cum", "shpng time to madurai", "hw mny d8s to bangalore", "fish wen reach",
+    "how long shipng take", "hw lng 4 delivery", "when wil fish arrive", "wen fish cum", "how mny days delivry", "delivry time",
+    "wen will my order reach", "when will my parcel come", "arrive when?", "deliveri time to coimbatore", "whn will the fish reach",
+    "dilivery tym", "how meny days to reach kochi", "wen wil my fish arrve", "shipping tym?", "delevery time pls",
+  ];
+  for (const m of MORE) {
+    it(`typo variant: '${m}' -> timing`, async () => {
+      const r = await one(m);
+      assert.ok(r.intent.startsWith("delivery_timing"), `${m} -> ${r.intent}`);
+      assert.ok(r.reply.includes("depends on") || r.reply === ANSWERS.deliveryTimingChennai);
+    });
+  }
+  const CONTROLS: Array<[string, (i: string) => boolean]> = [
+    ["when fish come back in stock", (i) => !i.startsWith("delivery_timing")],
+    ["when will blue diamond come in stock", (i) => !i.startsWith("delivery_timing")],
+    ["when will new fish come?", (i) => !i.startsWith("delivery_timing")],
+    ["wen is the next batch coming", (i) => !i.startsWith("delivery_timing")],
+    ["when did the fish come to you?", (i) => !i.startsWith("delivery_timing")],
+    ["when the fish come, should I switch off lights?", (i) => !i.startsWith("delivery_timing")],
+    ["how many days to acclimate?", (i) => !i.startsWith("delivery_timing")],
+    ["how long shopping bag stays", (i) => !i.startsWith("delivery_timing")],
+    ["when can I come to the store?", (i) => i === "visit"],
+    ["when will it ship", (i) => i === "ship_how"],
+    ["wen will it ship", (i) => i === "ship_how"],
+    ["when do you deliver", (i) => i === "ship_how"],
+    ["my fish arrived dead", (i) => i === "loss_safety_net"],
+    ["wen will my fish arrive, last one arrived dead", (i) => i === "loss_safety_net"],
+    ["call me", (i) => i === "human_push"],
+    ["conect me", (i) => i === "human_push"],
+    ["whn can i talk to shiva", (i) => i === "human_push"],
+    ["when will shiva contact me", (i) => i === "order_received"],
+    ["when will my request reach shiva", (i) => i === "order_received"],
+    ["meen eppo vandhu serum?", (i) => i === "delivery_timing"],
+  ];
+  for (const [m, ok] of CONTROLS) {
+    it(`control: '${m}'`, async () => {
+      const r = await one(m);
+      assert.ok(ok(r.intent), `${m} -> ${r.intent}`);
+    });
+  }
+  it("timingNorm maps short forms and typos, leaves other words alone", () => {
+    assert.equal(timingNorm("wen wil it arive"), "when will it arrive");
+    assert.equal(timingNorm("hw mny d8s"), "how many days");
+    assert.equal(timingNorm("dlvry tym"), "delivery time");
+    assert.equal(timingNorm("shopping bag"), "shopping bag");
+    assert.equal(timingNorm("serum"), "serum");
+    assert.equal(timingNorm("teach"), "teach");
   });
 });

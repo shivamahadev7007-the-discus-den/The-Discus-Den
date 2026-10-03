@@ -1110,7 +1110,7 @@ const ORDER_IN_CHAT =
   /\b(order|buy|book|purchase|reserve)\s+(it\s+|them\s+|fish\s+)?(on|in|through|via|over|using|from)\s+(the\s+|this\s+)?(chat|chatbot|bot|whatsapp|here)\b|\b(can|could|may|do)\s+(i|we)\s+(just\s+)?(order|buy|book|purchase)\s+(here|right\s+here|now\s+here|from\s+you\s+here)\b|\b(can|could|will)\s+(you|u)\s+(take|book|place|note)\s+(my|the|an|our)\s+order\b|\b(take|book|place)\s+(my|the|an)\s+order\s+(here|on\s+chat|in\s+chat|via\s+chat)\b|\bchat\s+(itself|la\s+order|mein\s+order)\b|\bchat\s+(la|le|mein|me)\s+(order|book)\w*/;
 /** LB-6 B6: "how will I know you got my order?" -> Place request notifies Shiva, who contacts you. */
 const ORDER_RECEIVED =
-  /\bhow\s+(will|would|do|can|shall)\s+i\s+know\b[^?.]*\b(order|request|got\s+it|received|placed|went\s+through)\b|\b(did|have|has)\s+(you|u|shiva|the\s+den)\s+(get|got|receive|received|seen?)\s+(my|our|the)\s+(order|request)\b|\b(will|do)\s+(i|we)\s+get\s+(a\s+|any\s+)?(confirmation|notification|reply|call\s+back|message)\b|\bwhat\s+happens\s+(after|once|when)\s+(i\s+)?(place|order|placing|tap|submit)\w*|\b(order|request)\s+(confirmation|status|received)\b|\b(is|was)\s+my\s+(order|request)\s+(received|placed|confirmed|through)\b|\bwho\s+(will\s+)?(contact|call|reply\s+to)\s+me\b|\bwhen\s+(will|would|does|do)\s+(shiva|he|you|someone|the\s+den)\s+(contact|call|reply\s+to|message|get\s+back\s+to)\s+(me|us)\b|\bwhen\s+(will|do)\s+i\s+hear\s+(from|back)\b/;
+  /\bhow\s+(will|would|do|can|shall)\s+i\s+know\b[^?.]*\b(order|request|got\s+it|received|placed|went\s+through)\b|\b(did|have|has)\s+(you|u|shiva|the\s+den)\s+(get|got|receive|received|seen?)\s+(my|our|the)\s+(order|request)\b|\b(will|do)\s+(i|we)\s+get\s+(a\s+|any\s+)?(confirmation|notification|reply|call\s+back|message)\b|\bwhat\s+happens\s+(after|once|when)\s+(i\s+)?(place|order|placing|tap|submit)\w*|\b(order|request)\s+(confirmation|status|received)\b|\b(is|was)\s+my\s+(order|request)\s+(received|placed|confirmed|through)\b|\bwho\s+(will\s+)?(contact|call|reply\s+to)\s+me\b|\bwhen\s+(will|would|does|do)\s+(shiva|he|you|someone|the\s+den)\s+(contact|call|reply\s+to|message|get\s+back\s+to)\s+(me|us)\b|\bwhen\s+(will|do)\s+i\s+hear\s+(from|back)\b|\b(order|request)\s+(will\s+)?(reach|reaches|get\s+to|go\s+to)\s+(shiva|him|you)\b/;
 /** LB-6 C7: collecting at the railway station is SOP step 4, not Chennai store pickup. */
 const STATION = /\b(railway|station|platform|rail\s+agent|train\s+agent|porter|ported)\b/;
 /** LB-6 C5: full amount / advance questions -> the SOP payment step. */
@@ -1153,7 +1153,7 @@ function outOfArea(state: ChatState, place: Place): string {
 const DELIVERY_TIMING = new RegExp(
   [
     String.raw`\b(when|by\s+when|how\s+soon|how\s+long|how\s+many\s+(days|hours)|how\s+fast|what\s+day|which\s+day)\b[^?.!]*\b(reach|reaches|reached|arrive|arrives|arrival|delivered|receive|get\s+(my|the|them|it|those|these)\b|come\s+to\s+me|take\s+to\s+(reach|arrive|come|get)|delivery\s+take|shipping\s+take|transit|journey|by\s+train|on\s+the\s+train)`,
-    String.raw`\b(how\s+many\s+days|how\s+long|how\s+soon|how\s+fast)\s+(for|is|does|will)?\s*(the\s+)?(delivery|shipping|transit)\b`,
+    String.raw`\b(how\s+many\s+days|how\s+long|how\s+soon|how\s+fast)\s+(for|4|is|does|will)?\s*(the\s+)?(delivery|shipping|transit)\b`,
     String.raw`\b(delivery|shipping|transit|arrival|travel)\s+(time|timing|timings|duration|date|days|period|eta)\b|\bestimated\s+(delivery|arrival)\b|\beta\b|\bhow\s+fast\s+is\s+(the\s+)?(shipping|delivery)\b`,
     // Tanglish: eppo varum / epo kedaikkum / evlo naal aagum / ethana naal la varum
     String.raw`\b(eppo|eppa|epo|yeppo|eppodhu|eppothu)\b[^?.!]*\b(varum|varuma|varumaa|kedaikkum|kidaikkum|kedaikum|serum|reach|delivery|vandhu\s+serum)\b|\b(varum|kedaikkum|kidaikkum|serum)\s+(eppo|epo|eppa)\b|\b(evlo|evvalavu|evlavu|evalo|ethana|ethanai|ethanai)\s+(naal|nal|naalu|days|day)\b|\bdelivery\s+(eppo|epo)\b`,
@@ -1162,8 +1162,56 @@ const DELIVERY_TIMING = new RegExp(
   ].join("|"),
 );
 /** "how many days to Bangalore?" / "how long to Mumbai by train?" (only with a known place). */
-const TIMING_TO_PLACE = /\bhow\s+(long|many\s+days|many\s+hours)\s+(does\s+it\s+take\s+)?(to|for|till|until)\s+/;
-const NOT_TIMING = /\b(hold|holding|keep\s+(them|my\s+fish|the\s+fish)|quarantin\w*|fast(ed|ing)?\s+(them|the\s+fish|for)|grow|live|lifespan|refund|claim)\b|\bwhen\s+(will|do|would|does)\s+(you|it|they|the\s+fish)\s+(ship|dispatch|send)\b(?![^?.!]*\b(reach|arrive|get\s+to)\b)/;
+const TIMING_TO_PLACE = /\bhow\s+(long|many\s+days?|many\s+hours)\s+(does\s+it\s+take\s+)?(to|for|till|until)\s+/;
+// LB-18 typos (Kiara 25a82a7): "wen will fish reach me", "delivry time", "hw long shiping",
+// "fish reach when?", "when fish come". Word-order variants on the normalised text.
+const TIMING_ORDER =
+  /\b(reach|reaches|arrive|arrives|come|comes|delivery|delivered|get\s+(it|them|my\s+fish|the\s+fish))\s+(when|by\s+when)\b|\bwhen\b[^?.!]*\b(fish|it|they|order|parcel|discus|fishes)\s+(will\s+)?(come|reach|arrive|get\s+here)\b|\bhow\s+many\s+days?\s+(will\s+it\s+|to\s+)?(reach|arrive|come|delivery)\b/;
+/** SMS short forms and common misspellings of the timing words (explicit: short words are never fuzzy-matched). */
+const TIMING_SHORT: Record<string, string> = {
+  wen: "when", whn: "when", wn: "when", wehn: "when", whne: "when", whan: "when",
+  tym: "time", tme: "time", tim: "time", tyme: "time", timee: "time",
+  hw: "how", hww: "how", hoow: "how",
+  mny: "many", meny: "many", mani: "many", manny: "many", mnay: "many",
+  dys: "days", dayz: "days", dyas: "days", d8s: "days", daays: "days",
+  lng: "long", lnog: "long", lomg: "long", lon: "long", longg: "long",
+  dlvry: "delivery", dlvy: "delivery", dlivery: "delivery", delvry: "delivery", dilivery: "delivery", delevery: "delivery", delivry: "delivery",
+  shpng: "shipping", shpg: "shipping", shippin: "shipping", shiping: "shipping", shippng: "shipping",
+  rch: "reach", rech: "reach", reech: "reach", raech: "reach", reah: "reach",
+  arive: "arrive", arrve: "arrive", ariv: "arrive", arival: "arrival",
+  cum: "come", kum: "come", cme: "come", coem: "come",
+  wil: "will", wll: "will", wiil: "will",
+  gt: "get", gte: "get",
+};
+const TIMING_LONG = ["delivery", "shipping", "arrive", "arrival", "reach"];
+/** Words that look like a timing word but aren't ("shopping bag", "deliver" is fine as is). */
+const TIMING_NOT = new Set(["shopping", "shipped", "react", "teach", "delicious", "deliver", "delivers", "delivered", "arrived", "reached"]);
+function timingWord(w: string): string {
+  if (TIMING_SHORT[w]) return TIMING_SHORT[w]!;
+  if (w.length < 5 || TIMING_NOT.has(w)) return w;
+  for (const v of TIMING_LONG) {
+    if (w[0] !== v[0] || w === v) continue;
+    const limit = v.length >= 8 ? 2 : 1;
+    if (levenshtein(squeeze(w), v) <= limit || levenshtein(w, v) <= limit) return v;
+  }
+  return w;
+}
+/** Plain Levenshtein distance (uncapped; editDistance above returns 2 for "2 or more"). */
+function levenshtein(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length]!;
+}
+/** LB-18: the message with timing-vocabulary typos and short forms mapped to the real words. */
+export function timingNorm(t: string): string {
+  return t.replace(/[a-z0-9]+/g, (w) => timingWord(w));
+}
+
+const NOT_TIMING = /\b(back\s+in\s+stock|in\s+stock|restock\w*|come\s+back|available\s+again|new\s+(fish|stock|batch|arrivals?|strains?)|next\s+(batch|lot|stock)|when\s+did|acclimat\w*|(should|do|can)\s+i\s+(switch|turn|feed|keep|add|put|float|open|change)|hold|holding|keep\s+(them|my\s+fish|the\s+fish)|quarantin\w*|fast(ed|ing)?\s+(them|the\s+fish|for)|grow|live|lifespan|refund|claim)\b|\bwhen\s+(will|do|would|does)\s+(you|it|they|the\s+fish)\s+(ship|dispatch|send)\b(?![^?.!]*\b(reach|arrive|get\s+to)\b)/;
 
 function deliveryTimingAnswer(state: ChatState, t: string): Turn {
   state.pendingOffer = null;
@@ -1588,7 +1636,11 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     // LB-18: "when will the fish reach me?" -> depends on place + train route, then the SOP + Chennai pickup.
     id: "delivery_timing", tier: "faq", faq: "LB-18: delivery timing",
-    test: (m) => (DELIVERY_TIMING.test(m.t) || (TIMING_TO_PLACE.test(m.t) && findPlace(m.t) !== null)) && !NOT_TIMING.test(m.t),
+    // LB-18 typos: matched on timingNorm(t) ("wen", "delivry", "hw lng", "tym"...).
+    test: (m) => {
+      const n = timingNorm(m.t);
+      return (DELIVERY_TIMING.test(n) || TIMING_ORDER.test(n) || (TIMING_TO_PLACE.test(n) && findPlace(m.t) !== null)) && !NOT_TIMING.test(n);
+    },
     run: ({ state, t }) => deliveryTimingAnswer(state, t),
   },
   {
@@ -1703,7 +1755,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   },
   {
     id: "ship_how", tier: "faq", faq: "FAQ 9",
-    test: (m) => RE.shipHow.test(m.t) && !findPlace(m.t),
+    test: (m) => RE.shipHow.test(timingNorm(m.t)) && !findPlace(m.t), // LB-18: "wen will it ship" too
     run: ({ state }) => { state.pendingOffer = null; return { reply: join(`${ANSWERS.shippingHow}\n${ANSWERS.sop}`, ANSWERS.shipInStates), intent: "ship_how" }; },
   },
   { id: "ship", tier: "faq", faq: "FAQ 5 / 25", test: (m) => RE.ship.test(m.t), run: ({ state, t }) => shippingAnswer(state, t) },
