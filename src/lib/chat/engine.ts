@@ -164,7 +164,7 @@ const RE = {
     /\b(sick|ill|unwell|disease|diseased|spots?|white\s+spot|not\s+eating|isn'?t\s+eating|stopped\s+eating|won'?t\s+eat|hiding|fungus|ich|bloat(ed)?|dropsy|parasites?|medicine|medication|treatment|treat|cure|salt|dying|gasping|clamped|udambu|sari\s+illa|saapdala|saapidala|saapidavillai|noi)\b/,
   // Never shared (not on the site): mortality/loss figures, suppliers/breeders.
   internal:
-    /\b(mortality|death\s+rate|how\s+many\s+died|losses|supplier|suppliers|breeder|breeders|where\s+do\s+you\s+(get|source|import|buy)|source\s+farm|which\s+farm|imported?\s+from|who\s+supplies|who\s+breeds|bred\s+by|yaar\s+kitta|vaangu\w*)\b/,
+    /\b(mortality|death\s+rate|how\s+many\s+died|losses|supplier|suppliers|breeders?(?!\s*(pairs?|size|stock|discus|fish))|where\s+do\s+you\s+(get|source|import|buy)|source\s+farm|which\s+farm|imported?\s+from|who\s+supplies|who\s+breeds|bred\s+by|yaar\s+kitta|vaangu\w*)\b/,
   // Stock / quantity questions: answered with availability only, never a number.
   stock:
     /\b(how\s+many\b[^?.]*\b(left|remaining|available|in\s+stock|do\s+you\s+have|have\s+you\s+got|pieces|units|are\s+there|in\s+the\s+den|can\s+i\s+(buy|get|order)|on\s+hand)|exactly\s+how\s+many|how\s+many\s+exactly|(more|less|fewer)\s+than\s+\d+|at\s+least\s+\d+|\d+\s+(pieces?|pcs|nos?)\s+(available|irukk\w*)|quantity|qty|count(?=\s*\?)|count$|count\s+(of|left|available|irukk\w*)|pieces?\s+(left|available|remaining)|in\s+stock(?=\s*\?)|any\s+left|left\s+in\s+stock|stock\s+left|how\s+many\s+(fish|discus)\s+(do\s+you\s+have|are\s+there|left)|stock\s+(count|level|quantity|position|status)|quantity\s+(left|available)|how\s+much\s+stock|(what|which)\s+is\s+in\s+stock|in\s+stock\s+(now|today)|selling\s+fast|sold\s+out|almost\s+gone|last\s+one|only\s+(one|1|\d+)\b[^?.]*\bleft|\w+\s+left\s*\?|stock\s+(is\s+)?limited|limited\s+stock|plenty|enough\s+(for|of)|that\s+many|short\s+supply|running\s+out|(evlo|evvalavu|evlavu|evalo|ethana|ethanai)\b[^?.]*\b(irukk\w*|stock|left|pieces?|piece|fish)|(stock|pieces?)\s+(evlo|evvalavu|ethana)\w*)\b/,
@@ -793,6 +793,68 @@ async function beginnerAnswer(state: ChatState, ctx: Ctx): Promise<Turn> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// LB-5: requests for anything not on the stock page
+// ---------------------------------------------------------------------------
+
+/** Always a request for something not listed (sizes, ages, batches, custom...). */
+const UNLISTED_STRONG = new RegExp(
+  [
+    String.raw`\b(baby|babies|juveniles?|fry|fingerlings?|younger|smaller|bigger|larger|tinier)\b`,
+    String.raw`\bcoin[\s-]*(size|sized)\b|\bcoin\s+(discus|fish)\b`,
+    String.raw`\b(breeders?|breeding|adult|mature|grown[\s-]?up|full[\s-]?grown)\s+(pairs?|discus|fish|ones?|size|stock)\b|\bbreeders?\s*pair\b`,
+    String.raw`\b(any\s+other|other|different)\s+(sizes?|strains?|fish|discus|colou?rs?|variet\w+|options?|kinds?|types?|ages?)\b|\bany\s+other\s*\??\s*$`,
+    String.raw`\b(coming\s+soon|next\s+batch|new\s+(batch|stock|arrivals?)|restock\w*|back\s+in\s+stock|when\s+will\s+you\s+(get|have)|future\s+stock|upcoming)\b`,
+    String.raw`\bcan\s+(you|u)\s+(source|import|procure|arrange\s+(a|an|some|other|another)|get\s+(me\s+|us\s+)?(a|an|some|other|another|more|smaller|bigger)|bring\s+(me\s+)?(a|an|some|other|another))\b`,
+    String.raw`\b(custom|customi[sz]ed|special\s+(request|order|size)|pre[\s-]?order|made\s+to\s+order|on\s+request)\b`,
+    String.raw`\b(what|which)\s+age\b|\bhow\s+old\b|\b\d+\s*(months?|weeks?)\s+old\b`,
+    String.raw`\b(chinna|chinnadhu|chinnathu|chinnadha|kutty|kutti|periya|periyadhu|periyathu|perusu)\b`,
+    String.raw`\badutha\s+(batch|stock)\b|\bvera\s+(size|fish|variety|colou?r|strain|edhavadhu)\b|\bpudhu\s+(batch|stock)\b`,
+  ].join("|"),
+);
+/** Cheaper / budget asks: only when not about shipping, payment or discounts. */
+const UNLISTED_CHEAPER =
+  /\b(cheaper|cheap\s+(one|ones|fish|discus|option)|budget|low(er)?\s+(price|priced|rate|cost)|less\s+(price|expensive|costly)|reduce\s+the\s+price|price\s+(kammi|kuraivu|kuraichu)|kammi\s*(price|rate|vilai|vela|la|ah)|(vilai|rate)\s+(kammi|kuraivu)|kuraivu\s*(price|vilai|rate|la))\b/;
+const UNLISTED_CHEAPER_SKIP = /\b(ship\w*|deliver\w*|courier|transport|train|payment|pay|gpay|upi|discount|coupon|promo|code)\b/;
+/** Vague size words: a request only next to a fish/size word (not "how big is ..."). */
+const UNLISTED_WEAK = /\b(small|big|large|tiny|little|young|adult|mature)\s+(size|sized|ones?|discus|fish|pairs?|blue|red|yellow|white|albino|tiger|wild|panda|galaxy|marlboro|panthera|diamonds?|ninja|turquoise\w*|checker\w*|snakeskin|scorpion|butterfly|vipers?|eagles?)\b|\b(size|sizes)\s+(small|big|large|tiny)\b/;
+const UNLISTED_NOT_FISH = /\b(tank|aquarium|food|pellets?|heart\s+mix|bloodworms?|feed|filter|heater|box|bag|order\s+size)\b/;
+const INCH_ASK = /\b(\d+(?:\.\d+)?)\s*(?:inch|inches|in\b|")/;
+
+export type UnlistedKind = "strong" | "cheaper" | "weak" | "inch";
+
+/** Which kind of "not listed" request a message is (null = none). */
+export function unlistedAsk(t: string): UnlistedKind | null {
+  if (UNLISTED_STRONG.test(t) && !UNLISTED_NOT_FISH.test(t.replace(UNLISTED_STRONG, " "))) return "strong";
+  if (UNLISTED_CHEAPER.test(t) && !UNLISTED_CHEAPER_SKIP.test(t)) return "cheaper";
+  if (UNLISTED_WEAK.test(t) && !UNLISTED_NOT_FISH.test(t)) return "weak";
+  if (INCH_ASK.test(t) && !UNLISTED_NOT_FISH.test(t)) return "inch";
+  return null;
+}
+
+async function unlistedFirm(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn | null> {
+  const kind = unlistedAsk(t);
+  if (!kind) return null;
+  if (kind === "weak" || kind === "inch") {
+    // Exact listed match keeps the normal reply ("Blue Diamonds Small", "3 inch Blue Diamond").
+    const cards = await liveStrains(ctx);
+    if (cards) {
+      const matched = matchStrains(raw, cards).cards;
+      if (kind === "weak") {
+        const w = /\b(small|big|large|tiny|little|young|adult|mature)\b/.exec(t)?.[1];
+        const q = w === "large" ? "big" : w;
+        if (matched.some((c) => cardKeys(c).qualifier === q)) return null;
+      } else {
+        const n = Number(INCH_ASK.exec(t)![1]);
+        const pool = matched.length ? matched : cards;
+        if (pool.some((c) => { const r = sizeRange(c.size); return r !== null && n >= r[0] && n <= r[1]; })) return null;
+      }
+    }
+  }
+  state.pendingOffer = null;
+  return { reply: ANSWERS.unlistedFirm, intent: "unlisted_firm" };
+}
+
 const QUARANTINE_HOLD =
   /\b(quarantin\w*|hold|holds|holding|held|keep\s+(my|the)\s+fish|keep\s+them|keeps?\s+(the\s+)?fish|settle\w*|condition\w*\s+(the\s+)?fish)\b/;
 const SHIP_WORD =
@@ -1164,6 +1226,15 @@ export const INTENT_RULES: readonly IntentRule[] = [
     id: "reseller", tier: "faq", faq: "FAQ 17",
     test: (m) => RE.reseller.test(m.t),
     run: ({ state }) => { state.pendingOffer = "handoff"; return { reply: ANSWERS.reseller, intent: "reseller" }; },
+  },
+  {
+    // LB-5: a size / age / cheaper option / batch / custom request that isn't
+    // listed -> firm "the stock page is everything" reply. Runs after safety and
+    // before holding, price and strain rules. Returns null (falls through) when
+    // the requested size exactly matches a listed card.
+    id: "unlisted_firm", tier: "faq", faq: "LB-5: unlisted request (firm)",
+    test: (m) => unlistedAsk(m.t) !== null,
+    run: ({ state, raw, t, ctx }) => unlistedFirm(state, raw, t, ctx),
   },
   {
     // LB-3: quarantine / hold / keep-the-fish + shipping in one message ->

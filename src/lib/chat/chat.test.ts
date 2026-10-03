@@ -1246,3 +1246,96 @@ describe("LB-3: quarantine + ship -> Yes, quarantine, hold rule, then delivery",
     assert.equal((await one("Do you quarantine your fish?")).reply, ANSWERS.quarantine);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LB-5 (Shiva, 3 Oct): sizes / ages / cheaper / batches / custom requests that
+// aren't listed get one firm reply: the stock page is everything.
+// ---------------------------------------------------------------------------
+describe("LB-5: unlisted size / age / price requests -> firm reply", () => {
+  const FIRM = ANSWERS.unlistedFirm;
+  const triggers = [
+    "Do I get a baby or coin size Blue Diamond?",
+    "do you have baby discus?",
+    "coin size discus available?",
+    "any juvenile Red Ninja?",
+    "do you sell discus fry?",
+    "do you have younger fish?",
+    "any smaller Blue Diamonds?",
+    "do you have something smaller?",
+    "bigger Albino Platinum available?",
+    "any larger discus than these?",
+    "is there a cheaper discus?",
+    "anything cheaper?",
+    "do you have budget fish?",
+    "lower price option for Red Ninja?",
+    "any other sizes?",
+    "other strains?",
+    "any other?",
+    "is anything new coming soon?",
+    "when is the next batch?",
+    "when will you get Pigeon Blood?",
+    "can you get me a smaller one?",
+    "can you source a Heckel for me?",
+    "custom order possible?",
+    "special request: I want a 6 inch Red Ninja",
+    "do you have an adult pair?",
+    "breeder pair available?",
+    "how old are the Yellow Diamonds?",
+    "do you have 2 months old discus?",
+    "chinna size irukka?",
+    "periya discus irukka?",
+    "kammi price la edhavadhu irukka?",
+    "vera size irukka?",
+    "adutha batch eppo?",
+    "small size discus?",
+    "do you have tiny discus?",
+    "6 inch discus?",
+  ];
+  for (const m of triggers) {
+    it(`firm: ${m}`, async () => {
+      const r = await one(m);
+      assert.equal(r.reply, FIRM, m);
+      assert.equal(r.intent, "unlisted_firm");
+      assert.doesNotMatch(r.reply, /₹|\brs\b|\d+\s*%|discount|off\b|per piece|•/i);
+      assert.doesNotMatch(r.reply, /shall i|want me to|pass your|i'?ll check|let me check|ask shiva/i, "no handoff / no 'I'll check'");
+      assert.equal(r.state.pendingOffer, null, "no handoff offer pending");
+      assert.equal(r.state.handoff.active, false);
+      assert.equal(guardReply(r.reply).text, r.reply);
+    });
+  }
+  it("Shiva's live phrasing gets the firm reply, never the two cards", async () => {
+    const r = await one("Do I get a baby or coin size Blue Diamond?");
+    assert.doesNotMatch(r.reply, /Blue Diamonds \((Big|Small)\)|₹3,750|₹1,100|5% off/);
+  });
+  for (const [m, want] of [
+    ["Do you have Blue Diamonds?", /Blue Diamonds \(Big\)/],
+    ["Blue Diamonds price?", /₹3,750 per piece/],
+    ["How much is Red Ninja?", /₹3,250 per piece/],
+    ["Blue Diamonds Small price?", /Blue Diamonds \(Small\), 3 inch, ₹1,100 per piece/],
+    ["do you have small blue diamonds?", /Blue Diamonds \(Small\)/],
+    ["big blue diamond price?", /Blue Diamonds \(Big\), 4\.5 inch, ₹3,750 per piece/],
+    ["3 inch Blue Diamond?", /Blue Diamonds \(Small\), 3 inch/],
+    ["How big is the Red Ninja?", /Red Ninja Discus, 4 inch/],
+    ["how many Blue Diamonds left?", /in stock right now/],
+    ["is Buffalo Heart Mix good for small discus?", /Buffalo Heart Mix|frozen|pellet/i],
+    ["is shipping cheaper by train?", /./],
+    ["what's the bitcoin price today", /./],
+  ] as const) {
+    it(`unchanged (listed / not a request): ${m}`, async () => {
+      const r = await one(m);
+      assert.notEqual(r.reply, FIRM, m);
+      assert.match(r.reply, want, `${m}\n${r.reply}`);
+    });
+  }
+  it("safety still runs first: a dead baby discus -> FAQ 26", async () => {
+    assert.equal((await one("the baby discus I got died")).reply, ANSWERS.lossSafetyNet);
+  });
+  it("discount questions still go to FAQ 19, not the firm reply", async () => {
+    assert.notEqual((await one("any discount code for a cheaper price?")).reply, FIRM);
+  });
+  it("mid-handoff: firm reply, then the pending question again", async () => {
+    const r = (await chat(["Talk to Shiva", "do you have baby discus?"])).at(-1)!;
+    assert.ok(r.reply.startsWith(FIRM), r.reply);
+    assert.ok(r.reply.endsWith(ANSWERS.handoffAskName), r.reply);
+  });
+});
