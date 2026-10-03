@@ -14,13 +14,15 @@
 import {
   ANSWERS,
   OWNER_FALLBACK,
+  outOfAreaReply,
   ownerReply,
   PER_PIECE_LINE,
+  SITE_STEPS,
   VOLUME_DISCOUNT_LINE,
   type LeadFlag,
 } from "./answers.ts";
 import type { CatalogLoader, FoodItem, StrainCard } from "./catalog.ts";
-import { findPlace } from "./places.ts";
+import { findPlace, type Place } from "./places.ts";
 
 // ---------------------------------------------------------------------------
 // State
@@ -704,6 +706,13 @@ function stockLine(c: StrainCard): string {
   return `• ${parts}, ${c.priceText} per piece: in stock right now.`;
 }
 
+/** Buying several ("can I get 20 pieces?", "need 6 fish", "a few of them"). */
+/** "can I get 20 pieces?" / "do you have 10?": a quantity ask, answered with availability only. */
+const QTY_ASK =
+  /\b(can|could|may)\s+(i|we)\s+(get|buy|order|have|take|book)\s+([2-9]|[1-9]\d+)\b(?!\s*(months?|weeks?|years?|days?|inch\w*|cm|"|'|\.\d))|\b(do\s+you\s+have|have\s+you\s+got|is\s+there|are\s+there)\s+([2-9]|[1-9]\d+)\b(?!\s*(months?|weeks?|years?|days?|inch\w*|cm|"|'|\.\d))|\b([2-9]|[1-9]\d+)\s*(pieces?|pcs|nos)\s*(available|possible|in\s+stock)?\s*\?/;
+const SEVERAL =
+  /\b([2-9]|[1-9]\d+)\s*(pieces?|pcs|nos|fish|discus|pairs?|of\s+(them|those|these))\b|\b(buy|get|order|take|need|want|book|have)\s+([2-9]|[1-9]\d+)\b|\b(several|multiple|bulk|a\s+few\s+of)\b/;
+
 async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
   const cards = await allStrains(ctx);
   if (!cards || !cards.length) {
@@ -717,8 +726,10 @@ async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): 
     .filter((w) => !w.split(" ").every((x) => chosenWords.has(singular(x))));
   if (match.cards.length && !unmatchedVocab.length) {
     for (const c of match.cards) if (!state.interests.includes(c.name)) state.interests.push(c.name);
-    state.pendingOffer = "handoff";
-    return { reply: join(match.cards.slice(0, 5).map(stockLine).join("\n"), ANSWERS.stockOutro), intent: "stock_strain" };
+    // LB-6 (Shiva, 3 Oct): status only, then the site steps (+ volume line when buying several). No handoff.
+    state.pendingOffer = null;
+    const outro = SEVERAL.test(t) ? `${ANSWERS.stockOutro} ${VOLUME_DISCOUNT_LINE}` : ANSWERS.stockOutro;
+    return { reply: join(match.cards.slice(0, 5).map(stockLine).join("\n"), outro, SITE_STEPS), intent: "stock_strain" };
   }
   // A strain the site doesn't list: no count, ever.
   const vocab = match.cards.length ? unmatchedVocab : strainWordsIn(t).filter((w) => !COLOURS.includes(w));
@@ -732,9 +743,11 @@ async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): 
     state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.stockFetchFailed, intent: "stock_fallback" };
   }
-  state.pendingOffer = "narrow";
+  // LB-6 (Shiva, 3 Oct): status only, then the site steps (+ volume line when buying several).
+  state.pendingOffer = null;
+  const listOutro = SEVERAL.test(t) ? `${ANSWERS.stockListOutro} ${VOLUME_DISCOUNT_LINE}` : ANSWERS.stockListOutro;
   return {
-    reply: join(`${ANSWERS.stockIntro}\n${listed.slice(0, 5).map(stockLine).join("\n")}`, ANSWERS.stockListOutro),
+    reply: join(`${ANSWERS.stockIntro}\n${listed.slice(0, 5).map(stockLine).join("\n")}`, listOutro, SITE_STEPS),
     intent: "stock_list",
   };
 }
@@ -905,6 +918,15 @@ const QUARANTINE_HOLD =
 const SHIP_WORD =
   /\b(ship|ships|shipped|shipping|send|sends|sent|deliver|delivers|delivered|delivery|courier\w*|dispatch\w*|parcel|post\s+it|anuppu\w*)\b/;
 
+/** Generic "abroad" words name no place; show "Your location" instead. */
+const GENERIC_PLACE = /^(abroad|overseas|outside india|out of india|international|internationally|foreign|outside the country|other countries|another country)$/;
+const UPPER_PLACE: Record<string, string> = { uae: "UAE", usa: "USA", uk: "UK" };
+/** LB-6 (Shiva, 3 Oct): outside the 8 train states -> care-first, tentative handoff offer. Never a refusal. */
+function outOfArea(place: Place): string {
+  const name = GENERIC_PLACE.test(place.name) ? undefined : UPPER_PLACE[place.name] ?? titleCase(place.name);
+  return outOfAreaReply(name, place.zone === "abroad");
+}
+
 function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean } = {}): Turn {
   const withSop = (opts.sop ?? true) && !CHENNAI.test(t);
   const place = findPlace(t);
@@ -917,10 +939,10 @@ function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean } = {
     }
     addFlag(state, "OUTSIDE 8 STATES");
     state.pendingOffer = "handoff";
-    if (place.zone === "other") return { reply: ANSWERS.shipOtherState, intent: "ship_other_state" };
+    if (place.zone === "other") return { reply: outOfArea(place), intent: "ship_other_state" };
     addFlag(state, "REMOTE");
-    if (place.zone === "remote") return { reply: ANSWERS.shipRemote, intent: "ship_remote" };
-    return { reply: ANSWERS.shipAbroad, intent: "ship_abroad" };
+    if (place.zone === "remote") return { reply: outOfArea(place), intent: "ship_remote" };
+    return { reply: outOfArea(place), intent: "ship_abroad" };
   }
   state.pendingOffer = null;
   return { reply: withSop ? join(ANSWERS.shipInStates, SOP_BLOCK) : ANSWERS.shipInStates, intent: "ship_general" };
@@ -1130,10 +1152,10 @@ function guaranteeAnswer(state: ChatState, t: string): Turn {
   }
   addFlag(state, "OUTSIDE 8 STATES");
   state.pendingOffer = "handoff";
-  if (place.zone === "other") return { reply: ANSWERS.shipOtherState, intent: "guarantee_other_state" };
+  if (place.zone === "other") return { reply: outOfArea(place), intent: "guarantee_other_state" };
   addFlag(state, "REMOTE");
-  if (place.zone === "remote") return { reply: ANSWERS.shipRemote, intent: "guarantee_remote" };
-  return { reply: ANSWERS.shipAbroad, intent: "guarantee_abroad" };
+  if (place.zone === "remote") return { reply: outOfArea(place), intent: "guarantee_remote" };
+  return { reply: outOfArea(place), intent: "guarantee_abroad" };
 }
 
 const sizeAskRe = /(\d+(?:\.\d+)?)\s*(?:"|inch|inches)|\b(small|big|large|adult|juvenile)\s+(ones?|fish|discus|size)\b/;
@@ -1203,9 +1225,10 @@ export const INTENT_RULES: readonly IntentRule[] = [
     id: "discount", tier: "safety", faq: "FAQ 19",
     test: (m) => isDiscountCode(m.t, m.raw),
     run: ({ state }) => {
+      // LB-6 (Shiva, 3 Oct): no handoff; volume discounts are automatic in the Shopping Bag. Never a code.
       addFlag(state, "DISCOUNT ASKED");
-      state.pendingOffer = "handoff";
-      return { reply: `${ANSWERS.discount}\n\n${VOLUME_DISCOUNT_LINE}`, intent: "discount" };
+      state.pendingOffer = null;
+      return { reply: join(ANSWERS.discount, SITE_STEPS), intent: "discount" };
     },
   },
   {
@@ -1226,7 +1249,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     // LB-2 (Shiva, 3 Oct): availability only (in / out of stock), never a quantity.
     id: "stock_count", tier: "safety", faq: "C1: availability only",
-    test: (m) => RE.stock.test(m.t),
+    test: (m) => RE.stock.test(m.t) || QTY_ASK.test(m.t),
     run: ({ state, raw, t, ctx }) => stockAnswer(state, raw, t, ctx),
   },
   {

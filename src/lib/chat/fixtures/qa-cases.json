@@ -569,7 +569,7 @@
     },
     {
      "in": "Will the fish surely arrive alive in Delhi?",
-     "expect": "FAQ 5 other"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -758,7 +758,7 @@
    "turns": [
     {
      "in": "Do you ship to Delhi?",
-     "expect": "FAQ 5 other"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -767,7 +767,7 @@
    "turns": [
     {
      "in": "Can you ship to Port Blair, Andaman?",
-     "expect": "FAQ 5 remote"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -776,7 +776,7 @@
    "turns": [
     {
      "in": "Ship to Leh Ladakh possible?",
-     "expect": "FAQ 5 remote"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -785,7 +785,7 @@
    "turns": [
     {
      "in": "Will the fish surely arrive safe in Kolkata?",
-     "expect": "FAQ 5 other"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2020,7 +2020,7 @@
    "turns": [
     {
      "in": "Can you send fish to Singapore?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     },
     {
      "in": "yes",
@@ -2065,7 +2065,7 @@
     },
     {
      "in": "I live in London",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     },
     {
      "in": "pair",
@@ -2415,7 +2415,7 @@
    "turns": [
     {
      "in": "Can you send fish to Singapore?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2424,7 +2424,7 @@
    "turns": [
     {
      "in": "Do you ship to Dubai?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2433,7 +2433,7 @@
    "turns": [
     {
      "in": "Can you deliver to USA?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2442,7 +2442,7 @@
    "turns": [
     {
      "in": "ship to London possible?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2451,7 +2451,7 @@
    "turns": [
     {
      "in": "Do you deliver internationally?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2460,7 +2460,7 @@
    "turns": [
     {
      "in": "Can you send fish to my brother in Germany?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2469,7 +2469,7 @@
    "turns": [
     {
      "in": "Sri Lanka delivery?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2478,7 +2478,7 @@
    "turns": [
     {
      "in": "Can you courier to Kuala Lumpur?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2858,7 +2858,7 @@
    "turns": [
     {
      "in": "Do you ship to Kolkata?",
-     "expect": "FAQ 5 other"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2867,7 +2867,7 @@
    "turns": [
     {
      "in": "Will the fish arrive safe in Delhi?",
-     "expect": "FAQ 5 other"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -2876,7 +2876,7 @@
    "turns": [
     {
      "in": "Can you guarantee safe arrival to Andaman?",
-     "expect": "FAQ 5 remote"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -3254,7 +3254,7 @@
    "turns": [
     {
      "in": "can you guarantee they reach Kolkata alive?",
-     "expect": "FAQ 5 other"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -3263,7 +3263,7 @@
    "turns": [
     {
      "in": "Delhi ku anuppina fish safe ah varuma?",
-     "expect": "FAQ 5 other"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -3272,7 +3272,7 @@
    "turns": [
     {
      "in": "100% safe delivery to Jaipur?",
-     "expect": "FAQ 5 other"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -3290,7 +3290,7 @@
    "turns": [
     {
      "in": "Port Blair ku fish alive ah reach aagumaa?",
-     "expect": "FAQ 5 remote"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -3308,7 +3308,7 @@
    "turns": [
     {
      "in": "can you promise safe arrival in Imphal?",
-     "expect": "FAQ 5 remote"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -3317,7 +3317,7 @@
    "turns": [
     {
      "in": "can you ship to Toronto safely?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -3326,7 +3326,7 @@
    "turns": [
     {
      "in": "Doha ku anuppa mudiyuma?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     }
    ]
   },
@@ -3360,7 +3360,7 @@
     },
     {
      "in": "will the fish reach Kolkata safely?",
-     "expect": "FAQ 5 other"
+     "expect": "out-of-area"
     },
     {
      "in": "pair",
@@ -3467,7 +3467,7 @@
     },
     {
      "in": "can you send to Dubai safely?",
-     "expect": "FAQ 25"
+     "expect": "out-of-area"
     },
     {
      "in": "ready now",

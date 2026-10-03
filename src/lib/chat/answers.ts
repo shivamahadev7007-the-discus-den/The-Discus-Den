@@ -32,6 +32,26 @@ export const QUICK_TAPS = ["What fish are available?", "Care tips", "Talk to Shi
 export const VOLUME_DISCOUNT_LINE =
   "Orders of 5–9 fish get 5% off and 10 or more get 10% off, applied in the Shopping Bag.";
 
+/**
+ * LB-6 (Shiva, 3 Oct): the site steps, as on the live site. Used after
+ * discount / quantity answers and in "can I order on chat?".
+ */
+export const SITE_STEPS =
+  "To order: open Current Stock (thediscusden.com/available), choose a quantity on a card, open the Shopping Bag, tap Finalize, add your details and tap Place request. There's no payment on the site. Once your request is placed, Shiva is notified and takes it from there.";
+
+/**
+ * LB-6 (Shiva, 3 Oct): any place outside the 8 train states (other states,
+ * remote places, abroad). Never a refusal; a tentative, care-first handoff.
+ * Shiva's suggested wording; "[City]" is the place the visitor named.
+ */
+export const OUT_OF_AREA_LEAD =
+  "We only send fish when we're sure they'll arrive in optimal condition, never tired from a long journey.";
+export function outOfAreaReply(place?: string, abroad = false): string {
+  const where = place ? `${place} isn't` : "Your location isn't";
+  const route = abroad ? "our regular route" : "our regular train route";
+  return `${OUT_OF_AREA_LEAD} ${where} on ${route} yet, so Shiva would like to personally check the best route for you. Shall I pass your details to him?`;
+}
+
 export const PER_PIECE_LINE = "All prices are per piece. A pair is two pieces.";
 
 export const ANSWERS = {
@@ -97,10 +117,6 @@ export const ANSWERS = {
     "That depends on your tank and plans. Shiva will advise you personally once you place a request from the Shopping Bag on thediscusden.com.",
   shipInStates:
     "We deliver by train across Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana, Maharashtra, Madhya Pradesh and Odisha. Chennai pickup is also possible.",
-  shipOtherState:
-    "We can deliver to other states on request. Shiva will confirm the route and timing with you. Shall I pass your details?",
-  shipRemote:
-    "We'll try our best, but we can't guarantee safe arrival over very long journeys. Shiva will talk it through with you. Shall I pass your details?",
   /**
    * LB-6 (Shiva, 3 Oct): how to order = steer to the site. Button and page names
    * are the live site's own (3 Oct 11:30 IST): "Current Stock" page, quantity on
@@ -124,8 +140,7 @@ export const ANSWERS = {
   sop:
     "1. Your fish are moved to a separate customer holding tank.\n2. They're fasted for two days, and you get an update from us every day during this time.\n3. Shipping happens on day three, most likely the coming Saturday or Sunday.\n4. Shipping is by train. We give you a railway agent's contact: you can collect the fish at the station by speaking with the agent, or have them ported from the station to your place.\n5. Payment: half the amount as advance once your fish are moved to the holding tank, and the balance on shipping day, before dispatch.",
   /** LB-6 B3 (Lea, 3 Oct): "can I order on chat?" -> plain "No" + the site steps (audit exemption). */
-  orderInChat:
-    "No, orders go through our website, not this chat. To order: open Current Stock (thediscusden.com/available), choose a quantity on a card, open the Shopping Bag, tap Finalize, add your details and tap Place request. There's no payment on the site. Once your request is placed, Shiva is notified and takes it from there.",
+  orderInChat: `No, orders go through our website, not this chat. ${SITE_STEPS}`,
   /** LB-6 B6: how the customer knows the request went through (site wording: "Request placed"). */
   orderReceived:
     "When you tap Place request in the Shopping Bag, the site shows \"Request placed\" and Shiva is notified straight away. He then contacts you on the WhatsApp number you entered in the form.",
@@ -171,7 +186,9 @@ export const ANSWERS = {
   reseller: "Thanks. Shiva handles trade enquiries personally. Shall I pass your details to him?",
   sickFish:
     "Sorry to hear that. I can't give health or treatment advice here, but Shiva can talk it through with you personally. Shall I pass your details to him now?",
-  discount: "Shiva handles offers personally. Want me to pass your details to him?",
+  /** LB-6 (Shiva, 3 Oct): discount asks -> volume discounts (automatic in the Shopping Bag) + site steps. No handoff, no codes. */
+  discount:
+    "Volume discounts apply automatically in the Shopping Bag: 5% off for 5–9 fish and 10% off for 10 or more.",
   strainNotListedAsk:
     "That one isn't on our available page right now. Shiva can tell you if it's coming. Shall I ask him?",
 
@@ -194,8 +211,8 @@ export const ANSWERS = {
   stockPage: "thediscusden.com/available",
   stockIntro: "Here's what the site shows as in stock right now:",
   stockOutro:
-    "Availability is as shown on thediscusden.com/available right now. Shiva confirms quantities with you personally. Want me to pass your details to him?", // [PENDING Shiva ruling: quantity handoff]
-  stockListOutro: "Full list: thediscusden.com/available\nWant me to narrow it down by size or colour?",
+    "Availability is as shown on thediscusden.com/available right now.", // LB-6 (Shiva, 3 Oct): no quantity handoff; site steps follow
+  stockListOutro: "Full list: thediscusden.com/available.",
   stockFetchFailed:
     "I can't load live availability right now. You can check thediscusden.com/available.",
   /**
@@ -222,8 +239,6 @@ export const ANSWERS = {
   unsure:
     "Everything is on thediscusden.com and it's self-explanatory. Once you place a request from the Shopping Bag, Shiva is notified and takes it from there.",
   /** FAQ 25: delivery abroad. Hand off; flags OUTSIDE 8 STATES + REMOTE. Never promise international shipping. */
-  shipAbroad:
-    "We deliver within India by train. Shiva can tell you whether anything is possible for your location. Shall I pass your details to him?",
   thanks: "You're welcome. Anything else I can help with?",
   bye: "Thank you for visiting The Discus Den. Take care.",
 
