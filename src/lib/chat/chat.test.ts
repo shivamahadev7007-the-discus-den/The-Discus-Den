@@ -1,12 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ANSWERS, OUT_OF_AREA_LEAD, outOfAreaReply, SITE_STEPS, VOLUME_DISCOUNT_LINE } from "./answers.ts";
+import { ANSWERS, deliveryTimingFor, firmPushReply, FIRM_CLOSINGS, HUMAN_PUSH_FIRM, OUT_OF_AREA_LEAD, outOfAreaReply, SITE_STEPS, VOLUME_DISCOUNT_LINE } from "./answers.ts";
 import { attachStock, createCatalogLoader, findSiteBundlePath, normName, parseAvailableHtml, parseFoodHtml, parseOwnerName, parseSiteStock, priceCacheMsFromEnv, type CatalogLoader, type FetchLike } from "./catalog.ts";
-import { extractIndianMobile, matchStrains, parseName, respond, type ChatState } from "./engine.ts";
+import { extractIndianMobile, isReachAsk, matchStrains, parseName, pleasantryOnly, respond, timingNorm, type ChatState } from "./engine.ts";
 import { guardReply } from "./guard.ts";
 import { ALERT_CAPS, handleChatRequest, handleOptions, RATE_LIMITS } from "./http.ts";
 import { formatLeadAlert, type LeadForAlert, type TranscriptLine } from "./lead-alert.ts";
 import { createMemoryChatStore } from "./store.ts";
+import { findPlaceFuzzy } from "./places.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures: same markup shape as the live server-rendered pages.
@@ -103,12 +104,13 @@ function assertClean(text: string): void {
 describe("welcome + quick taps", () => {
   it("greeting -> welcome text from the pack", async () => {
     const r = await one("Hi");
-    assert.equal(r.reply, ANSWERS.welcome);
+    // LB-13: warm welcome + the fish-or-food question.
+    assert.equal(r.reply, `${ANSWERS.welcomeGreeting} ${ANSWERS.handoffAskLookingFor}`);
     assert.equal(r.handoff, false);
   });
 
   it("Tamil greeting -> welcome", async () => {
-    assert.equal((await one("vanakkam")).reply, ANSWERS.welcome);
+    assert.equal((await one("vanakkam")).reply, `${ANSWERS.welcomeGreeting} ${ANSWERS.handoffAskLookingFor}`);
   });
 
   it("'What fish are available?' -> 3-5 live cards, per piece, volume discounts, link", async () => {
@@ -384,19 +386,19 @@ describe("policies", () => {
 });
 
 describe("handoff flow", () => {
-  it("collects name, number, city, pair/single, delivery, timeline -> completes once", async () => {
+  it("collects name, fish-or-food, number, city, delivery, timeline -> completes once (LB-11)", async () => {
     const steps = await viaHandoff([
       "My name is Ravi",
+      "Discus fish",
       "+91 98450 12345",
       "Bangalore",
-      "a pair",
       "train",
       "tank is ready now",
       "thanks",
     ]);
-    assert.equal(steps[1]!.reply, ANSWERS.handoffAskPhone("Ravi"));
-    assert.equal(steps[2]!.reply, ANSWERS.handoffAskCity);
-    assert.equal(steps[3]!.reply, ANSWERS.handoffAskPairSingle);
+    assert.equal(steps[1]!.reply, ANSWERS.handoffAskLookingFor);
+    assert.equal(steps[2]!.reply, `${ANSWERS.lookingForFish}\n\n${ANSWERS.handoffAskPhone("Ravi")}`);
+    assert.equal(steps[3]!.reply, ANSWERS.handoffAskCity);
     assert.equal(steps[4]!.reply, ANSWERS.handoffAskDelivery);
     assert.equal(steps[5]!.reply, ANSWERS.handoffAskTimeline);
     const done = steps[6]!;
@@ -409,7 +411,7 @@ describe("handoff flow", () => {
       city: "Bangalore",
       stateName: "Karnataka",
       inShipStates: true,
-      pairSingle: "pair",
+      lookingFor: "Discus fish",
       delivery: "train shipping",
       timeline: "tank ready now",
     });
@@ -418,9 +420,9 @@ describe("handoff flow", () => {
   });
 
   it("invalid number -> one retry, then moves on; no number -> not completed", async () => {
-    const steps = await viaHandoff(["Meena", "12345", "no", "Chennai", "single", "pickup", "few weeks"]);
-    assert.equal(steps[2]!.reply, ANSWERS.handoffPhoneRetry);
-    assert.equal(steps[3]!.reply, ANSWERS.handoffAskCity);
+    const steps = await viaHandoff(["Meena", "fish", "12345", "no", "Chennai", "pickup", "few weeks"]);
+    assert.equal(steps[3]!.reply, ANSWERS.handoffPhoneRetry);
+    assert.equal(steps[4]!.reply, ANSWERS.handoffAskCity);
     const last = steps[steps.length - 1]!;
     assert.equal(last.completedNow, false);
     assert.equal(last.state.completed, false);
@@ -428,7 +430,7 @@ describe("handoff flow", () => {
   });
 
   it("outside 8 states skips the delivery question and flags it", async () => {
-    const steps = await viaHandoff(["Arjun", "9988776655", "Delhi", "pair", "ready now"]);
+    const steps = await viaHandoff(["Arjun", "fish", "9988776655", "Delhi", "ready now"]);
     assert.equal(steps[4]!.reply, ANSWERS.handoffAskTimeline);
     assert.ok(steps[5]!.state.flags.includes("OUTSIDE 8 STATES"));
     assert.equal(steps[5]!.completedNow, true);
@@ -438,7 +440,7 @@ describe("handoff flow", () => {
     const steps = await viaHandoff(["I'm Priya, 9123456789, from Chennai"]);
     assert.equal(steps[1]!.state.lead.phone, "+919123456789");
     assert.equal(steps[1]!.state.lead.city, "Chennai");
-    assert.equal(steps[1]!.reply, ANSWERS.handoffAskPairSingle);
+    assert.equal(steps[1]!.reply, ANSWERS.handoffAskLookingFor);
   });
 
   it("prompt injection mid-handoff does not change behaviour", async () => {
@@ -451,7 +453,7 @@ describe("handoff flow", () => {
   it("side question mid-handoff is answered, then the same field is re-asked", async () => {
     const steps = await viaHandoff(["Ravi", "how much is yellow diamonds?"]);
     assert.match(steps[2]!.reply, /₹850 per piece/);
-    assert.ok(steps[2]!.reply.endsWith(ANSWERS.handoffAskPhone("Ravi")));
+    assert.ok(steps[2]!.reply.endsWith(ANSWERS.handoffAskLookingFor));
   });
 
   it("offer -> 'no' declines politely", async () => {
@@ -485,7 +487,7 @@ describe("handoff flow", () => {
         turns: 3,
         pendingOffer: null,
         handoff: { active: false, phoneTries: 0, nameTries: 0, declined: [] },
-        lead: { name: "Arjun", phone: "+919988776655", city: "Delhi", stateName: "Delhi NCR", inShipStates: false, pairSingle: "pair", timeline: "tank ready now" },
+        lead: { name: "Arjun", phone: "+919988776655", city: "Delhi", stateName: "Delhi NCR", inShipStates: false, lookingFor: "Discus fish", timeline: "tank ready now" },
         tags: { buyer: "hobbyist", history: "first-timer", heat: "hot" },
         flags: ["OUTSIDE 8 STATES", "DISCOUNT ASKED"],
         interests: ["Yellow Diamonds"],
@@ -597,7 +599,7 @@ describe("HTTP /api/chat", () => {
     assert.equal(res.headers.get("access-control-allow-origin"), ORIGIN);
     const body = (await res.json()) as { reply: string; handoff: boolean };
     assert.deepEqual(Object.keys(body).sort(), ["handoff", "reply"]);
-    assert.equal(body.reply, ANSWERS.welcome);
+    assert.equal(body.reply, `${ANSWERS.welcomeGreeting} ${ANSWERS.handoffAskLookingFor}`);
     assert.equal(store.messages.length, 2);
     assert.deepEqual(store.messages.map((m) => m.role), ["user", "bot"]);
     assert.equal(store.messages[0]!.source, "insta");
@@ -658,7 +660,7 @@ describe("HTTP /api/chat", () => {
         return { sent: true, channel: "console" as const };
       },
     };
-    const msgs = [...OPEN, "Ravi", "9845012345", "Kochi", "single", "train", "ready now", "Talk to Shiva", "what's my number?"];
+    const msgs = [...OPEN, "Ravi", "fish", "9845012345", "Kochi", "train", "ready now", "Talk to Shiva", "what's my number?"];
     const replies: string[] = [];
     for (const message of msgs) {
       const res = await handleChatRequest(post({ sessionId: SID, message, source: "fb" }), deps);
@@ -666,7 +668,9 @@ describe("HTTP /api/chat", () => {
     }
     assert.equal(alerts.length, 1);
     assert.equal(alerts[0]!.lead.state.lead.phone, "+919845012345");
-    assert.ok(alerts[0]!.transcript.length >= 14);
+    // LB-7: sent on the turn the number is captured (LB-6 opener + LB-11 fish-or-food: 5 visitor + 5 bot lines).
+    assert.equal(alerts[0]!.transcript.length, 10);
+    assert.equal(alerts[0]!.lead.state.lead.lookingFor, "Discus fish");
     assert.equal(store.leads.get(SID)!.completed, true);
     assert.equal(replies[8], ANSWERS.humanPush, "LB-6: a push after a completed handoff gets the site steer");
     for (const r of replies) assert.doesNotMatch(r, /9845012345|98450/);
@@ -946,7 +950,7 @@ describe("Kiara run 1 · E2 alert flooding", () => {
   const uuidFor = (i: number) => `3f2b8c1e-9a4d-4e2f-8b6a-${String(i).padStart(12, "0")}`;
 
   async function runLead(deps: Parameters<typeof handleChatRequest>[1], sid: string, intro: string, ip: string): Promise<void> {
-    for (const message of [...OPEN, intro, "pair", "Chennai pickup", "ready now"]) {
+    for (const message of [...OPEN, intro, "fish", "Chennai pickup", "ready now"]) {
       await handleChatRequest(post({ sessionId: sid, message, source: "site" }, { "x-forwarded-for": ip }), deps);
     }
   }
@@ -1415,11 +1419,12 @@ describe("LB-6: steer to the site instead of a handoff", () => {
       assert.equal(guardReply(r.reply).text, r.reply);
     });
   }
-  it("repeated pushes get the same polite steer, shortened, never a handoff or number", async () => {
+  it("repeated pushes: full steer, short steer, then the LB-15 polite reply (rotated), never a handoff or number", async () => {
     const out = await chat(["talk to a human", "please I need to talk to Shiva", "call me", "urgent connect me", "give me your number", "98450 12345"]);
     assert.equal(out[0]!.reply, ANSWERS.humanPush);
+    assert.equal(out[1]!.reply, ANSWERS.humanPushShort);
+    assert.deepEqual(out.slice(2).map((r) => r.reply), [...HUMAN_PUSH_FIRM]);
     for (const r of out.slice(1)) {
-      assert.equal(r.reply, ANSWERS.humanPushShort);
       assert.equal(r.state.handoff.active, false);
       assert.doesNotMatch(r.reply, NEVER);
     }
@@ -1448,7 +1453,7 @@ describe("LB-6: steer to the site instead of a handoff", () => {
     const alerts: LeadForAlert[] = [];
     const deps = { store, catalog: liveCatalog(), sendAlert: async (lead: LeadForAlert) => { alerts.push(lead); return { sent: true, channel: "console" as const }; } };
     const sid = "3f2b8c1e-9a4d-4e2f-8b6a-000000006b02";
-    for (const message of ["my fish arrived dead", "yes", "Ravi", "9845012345", "Kochi", "single", "train", "ready now", "talk to a human"]) {
+    for (const message of ["my fish arrived dead", "yes", "Ravi", "9845012345", "Kochi", "train", "ready now", "talk to a human"]) {
       await handleChatRequest(post({ sessionId: sid, message, source: "site" }), deps);
     }
     assert.equal(alerts.length, 1);
@@ -1756,7 +1761,7 @@ describe("Kiara LB-6 run (7a73e2c): regressions", () => {
     }
     assert.equal(alerts.length, 0);
     const resell = "3f2b8c1e-9a4d-4e2f-8b6a-000000006b04";
-    for (const message of ["I'm a reseller, do you do wholesale?", "yes", "Ravi", "9845012345", "Kochi", "single", "train", "ready now", "is this a bot?"]) {
+    for (const message of ["I'm a reseller, do you do wholesale?", "yes", "Ravi", "fish", "9845012345", "Kochi", "train", "ready now", "is this a bot?"]) {
       const res = await handleChatRequest(post({ sessionId: resell, message, source: "site" }), deps);
       assert.equal(res.status, 200, message);
     }
@@ -1886,12 +1891,802 @@ describe("LB-6 rulings: out-of-area handoff, discount and quantity without hando
     }
     assert.equal(alerts.length, 0, "discount and quantity asks send no email");
     const kol = "3f2b8c1e-9a4d-4e2f-8b6a-000000006c05";
-    for (const message of ["will you ship to Kolkata", "yes", "Ravi", "9845012345", "Kolkata", "pair", "ready now", "thanks", "will you ship to Kolkata"]) {
+    for (const message of ["will you ship to Kolkata", "yes", "Ravi", "fish", "9845012345", "ready now", "thanks", "will you ship to Kolkata"]) {
       const res = await handleChatRequest(post({ sessionId: kol, message, source: "site" }), deps);
       assert.equal(res.status, 200, message);
     }
     assert.equal(alerts.length, 1, "out-of-area handoff emails exactly once");
     assert.ok(alerts[0]!.state.flags.includes("OUTSIDE 8 STATES"));
     assert.equal(alerts[0]!.state.lead.city, "Kolkata");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LB-11 (Shiva, 3 Oct): "pair or single" is gone; the handoff asks
+// "Are you looking for Discus fish or Discus frozen foods?" right after the name.
+// LB-9 (Kiara): "I'll visit" at the delivery step = Chennai pickup, no loop.
+// ---------------------------------------------------------------------------
+describe("LB-11: fish-or-food replaces pair-or-single", () => {
+  const PAIR_SINGLE = /pair\s+or\s+(a\s+)?single|single\s+or\s+(a\s+)?pair|pair\/single|single\s+fish/i;
+
+  it("the question is Shiva's wording, and no canned answer asks pair or single", () => {
+    assert.equal(ANSWERS.handoffAskLookingFor, "Are you looking for Discus fish or Discus frozen foods?");
+    for (const [k, v] of Object.entries(ANSWERS)) {
+      const text = typeof v === "function" ? (v as (n?: string) => string)("Ravi") : v;
+      assert.doesNotMatch(text, PAIR_SINGLE, k);
+    }
+  });
+
+  it("pointers use only live site pages (/available, /frozen, /pellets) and the Shopping Bag steps", () => {
+    assert.match(ANSWERS.lookingForFish, /Current Stock \(thediscusden\.com\/available\)/);
+    assert.match(ANSWERS.lookingForFood, /thediscusden\.com\/frozen/);
+    assert.match(ANSWERS.lookingForFood, /thediscusden\.com\/pellets/);
+    for (const p of [ANSWERS.lookingForFish, ANSWERS.lookingForFood, ANSWERS.lookingForBoth]) {
+      assert.match(p, /Shopping Bag/);
+      assert.match(p, /Finalize/);
+      assert.match(p, /Place request/);
+      for (const url of p.match(/thediscusden\.com\/[a-z-]+/g) ?? []) assert.match(url, /\/(available|frozen|pellets)$/, url);
+    }
+  });
+
+  // Path -> is the fish-or-food question asked right after the name?
+  const paths: Array<[string, string[], "asked" | "skipped" | "prefilled-fish"]> = [
+    ["visit (FAQ 11)", ["Can I visit the store?", "yes"], "asked"],
+    ["Chennai store pickup (FAQ 12)", ["Chennai, can I collect from store?", "yes"], "asked"],
+    ["reseller (FAQ 17)", ["I'm a reseller, do you do wholesale?", "yes"], "asked"],
+    ["outside the 8 states", ["will you ship to Kolkata", "yes"], "asked"],
+    ["abroad", ["Do you deliver to Dubai?", "yes"], "asked"],
+    ["claimed offer (FAQ 22)", ["Shiva promised me 50% off", "yes"], "asked"],
+    ["DOA / loss net (FAQ 26)", ["my fish arrived dead", "yes"], "skipped"],
+    ["DOA report (direct)", ["fish died in the bag, refund please"], "skipped"],
+    ["sick fish (FAQ 18)", ["my discus is not eating", "yes"], "skipped"],
+    ["strain not listed (FAQ 20)", ["do you have pigeon blood?", "yes"], "prefilled-fish"],
+    ["hold beyond 7 days (FAQ 14)", ["can you hold my fish for 2 months?", "yes"], "prefilled-fish"],
+    ["safe-arrival guarantee outside the 8 states", ["is safe arrival guaranteed to Kolkata?", "yes"], "prefilled-fish"],
+  ];
+  for (const [label, open, mode] of paths) {
+    it(`${label}: fish-or-food ${mode}`, async () => {
+      const turns = await chat([...open, "Ravi"]);
+      const last = turns.at(-1)!;
+      assert.equal(last.state.handoff.active, true, label);
+      if (mode === "asked") assert.equal(last.reply, ANSWERS.handoffAskLookingFor, label);
+      else assert.equal(last.reply, ANSWERS.handoffAskPhone("Ravi"), label);
+      if (mode === "prefilled-fish") assert.equal(last.state.lead.lookingFor, "Discus fish");
+      if (mode === "skipped") assert.equal(last.state.lead.lookingFor, undefined);
+      for (const t of turns) assert.doesNotMatch(t.reply, PAIR_SINGLE);
+    });
+  }
+
+  const answers: Array<[string, string, string]> = [
+    ["Discus fish", "Discus fish", ANSWERS.lookingForFish],
+    ["fish", "Discus fish", ANSWERS.lookingForFish],
+    ["live discus", "Discus fish", ANSWERS.lookingForFish],
+    ["the first one", "Discus fish", ANSWERS.lookingForFish],
+    ["Discus frozen foods", "Discus frozen foods", ANSWERS.lookingForFood],
+    ["frozen food", "Discus frozen foods", ANSWERS.lookingForFood],
+    ["pellets", "Discus frozen foods", ANSWERS.lookingForFood],
+    ["food", "Discus frozen foods", ANSWERS.lookingForFood],
+    ["both", "Discus fish and frozen foods", ANSWERS.lookingForBoth],
+    ["fish and some frozen food", "Discus fish and frozen foods", ANSWERS.lookingForBoth],
+  ];
+  for (const [said, stored, pointer] of answers) {
+    it(`answer '${said}' -> ${stored} + the right site pointer`, async () => {
+      const turns = await viaHandoff(["Ravi", said]);
+      const r = turns.at(-1)!;
+      assert.equal(r.state.lead.lookingFor, stored);
+      assert.equal(r.reply, `${pointer}\n\n${ANSWERS.handoffAskPhone("Ravi")}`);
+    });
+  }
+
+  it("fish branch: full visit handoff, delivery and tank questions follow", async () => {
+    const t = await viaHandoff(["Ravi", "Discus fish", "9845012345", "Chennai", "pickup", "ready now"]);
+    assert.equal(t[3]!.reply, ANSWERS.handoffAskCity);
+    assert.equal(t[4]!.reply, ANSWERS.handoffAskDelivery);
+    assert.equal(t[5]!.reply, ANSWERS.handoffAskTimeline);
+    assert.equal(t[6]!.completedNow, true);
+  });
+  it("food branch: the tank-ready question is skipped for a frozen-food-only lead", async () => {
+    const t = await viaHandoff(["Meena", "frozen foods", "9123456780", "Chennai", "pickup"]);
+    assert.equal(t.at(-1)!.completedNow, true);
+    for (const s of t) assert.notEqual(s.reply, ANSWERS.handoffAskTimeline);
+    assert.equal(t.at(-1)!.state.lead.lookingFor, "Discus frozen foods");
+  });
+  it("an unclear answer is re-asked once, then kept as typed", async () => {
+    const t = await viaHandoff(["Ravi", "hmm", "guppies"]);
+    assert.equal(t[2]!.reply, ANSWERS.handoffAskLookingFor);
+    assert.equal(t[3]!.state.lead.lookingFor, "guppies");
+  });
+  it("a number typed at the fish-or-food step is kept as the number", async () => {
+    const t = await viaHandoff(["Ravi", "9845012345", "fish"]);
+    assert.equal(t[2]!.state.lead.phone, "+919845012345");
+    assert.equal(t[2]!.reply, ANSWERS.handoffAskLookingFor);
+    assert.equal(t[3]!.reply, `${ANSWERS.lookingForFish}\n\n${ANSWERS.handoffAskCity}`);
+  });
+  it("a session saved on the old pair/single step resumes on fish-or-food", async () => {
+    const turns = await chat(["Can I visit the store?", "yes", "Ravi"]);
+    const saved = structuredClone(turns.at(-1)!.state) as ChatState;
+    (saved.handoff as { step?: string }).step = "pairSingle";
+    const [r] = await chat(["fish"], undefined, saved);
+    assert.equal(r!.state.lead.lookingFor, "Discus fish");
+    assert.equal(r!.state.handoff.step, "phone");
+  });
+  it("standalone 'pair or single?' -> per-piece answer + site steps, no handoff, no question back", async () => {
+    for (const m of ["should I buy a pair or single?", "pair or single?", "should I get a pair?"]) {
+      const r = await one(m);
+      assert.equal(r.reply, `${ANSWERS.howManyToBuy}\n\n${SITE_STEPS}`, m);
+      assert.doesNotMatch(r.reply, PAIR_SINGLE);
+      assert.equal(r.state.pendingOffer, null);
+    }
+  });
+  it("the lead card shows 'Looking for', never 'Pair/Single'", async () => {
+    const t = await viaHandoff(["Ravi", "both", "9845012345", "Kochi", "train", "ready now"]);
+    const card = formatLeadAlert({ sessionId: "x", source: "site", state: t.at(-1)!.state });
+    assert.match(card, /^Looking for: Discus fish and frozen foods$/m);
+    assert.doesNotMatch(card, /pair|single/i);
+    const doa = await chat(["my fish arrived dead", "yes", "Ravi", "9845012345", "Kochi", "train", "ready now"]);
+    const doaCard = formatLeadAlert({ sessionId: "y", source: "site", state: doa.at(-1)!.state });
+    assert.doesNotMatch(doaCard, /Looking for|pair|single/i, "DOA claims don't carry the fish-or-food line");
+  });
+});
+
+describe("LB-9: 'I'll visit' at the delivery step = Chennai pickup (no loop)", () => {
+  const before = ["Ravi", "fish", "9845012345", "Chennai"];
+  for (const said of ["I'll visit", "I will come", "visit", "come to the store", "pickup", "naan varen", "I'll come personally", "will come", "nera varen", "I'm coming to the shop", "I will visit the store", "in person"]) {
+    it(`visit handoff, delivery answer '${said}' -> Chennai pickup, moves on`, async () => {
+      const t = await viaHandoff([...before, said]);
+      assert.equal(t[4]!.reply, ANSWERS.handoffAskDelivery);
+      const r = t.at(-1)!;
+      assert.equal(r.state.lead.delivery, "Chennai pickup", said);
+      assert.equal(r.reply, ANSWERS.handoffAskTimeline, said);
+      assert.doesNotMatch(r.reply, /Store visits/);
+    });
+  }
+  it("Kiara's repro: 'I'll visit' three times never re-asks the delivery question", async () => {
+    const t = await viaHandoff([...before, "I'll visit", "I'll visit", "I'll visit"]);
+    const after = t.slice(5);
+    assert.equal(after.filter((s) => s.reply.includes(ANSWERS.handoffAskDelivery)).length, 0);
+    assert.equal(t.at(-1)!.state.lead.delivery, "Chennai pickup");
+  });
+  it("controls: 'train' is still train shipping; a store-visit question mid-handoff is still answered", async () => {
+    const t = await viaHandoff([...before, "train"]);
+    assert.equal(t.at(-1)!.state.lead.delivery, "train shipping");
+    const q = await viaHandoff([...before, "where is your store located?"]);
+    assert.ok(q.at(-1)!.reply.endsWith(ANSWERS.handoffAskDelivery));
+    assert.equal(q.at(-1)!.state.lead.delivery, undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LB-15 (High, Shiva 3 Oct 12:46/12:49): 3rd push onward -> polite "place your
+// requirement" reply, rotated; never the same reply twice in a row; never a handoff.
+// LB-14: connect / talk / speak / call / reach / contact / put me through / get me...
+// LB-13: pleasantries -> warm line + "Discus fish or Discus frozen foods?".
+// ---------------------------------------------------------------------------
+const NO_BANG = (s: string) => (s.match(/!/g) ?? []).length === 0;
+
+describe("LB-15: escalating, never-identical replies to repeated pushes", () => {
+  it("Shiva's repro + 2 more: full steer, short steer, LB-15 reply, then rotated variants", async () => {
+    const out = await chat(["Connect to Shiva", "can I talk to the owner", "please connect me with him", "put me through to the owner", "get me the manager"]);
+    assert.deepEqual(out.map((r) => r.reply), [ANSWERS.humanPush, ANSWERS.humanPushShort, HUMAN_PUSH_FIRM[0], HUMAN_PUSH_FIRM[1], HUMAN_PUSH_FIRM[2]]);
+    for (const r of out) {
+      assert.equal(r.intent, "human_push");
+      assert.equal(r.state.handoff.active, false);
+      assert.equal(r.state.pendingOffer, null);
+      assertClean(r.reply);
+    }
+    assert.equal(out.at(-1)!.state.humanPushes, 5);
+  });
+  it("the 3rd-ask reply is Shiva's wording, naming the form (Shopping Bag, Finalize, Place request)", () => {
+    const firm = ANSWERS.humanPushFirm;
+    assert.ok(firm.startsWith("Understood. Kindly place your requirement"));
+    assert.match(firm, /fill in the form/);
+    assert.match(firm, /All your questions and concerns will be handled by the owner, Shiva, once he is notified\. We appreciate your cooperation\.$/);
+    for (const v of HUMAN_PUSH_FIRM) {
+      for (const step of ["thediscusden.com", "Shopping Bag", "Finalize", "Place request"]) assert.ok(v.includes(step), `${step} in ${v}`);
+      assert.ok(NO_BANG(v));
+      assert.equal(guardReply(v).text, v);
+      assertClean(v);
+    }
+    assert.equal(new Set(HUMAN_PUSH_FIRM).size, HUMAN_PUSH_FIRM.length);
+  });
+  it("other questions in between don't reset the count (3rd push in the session = LB-15 reply)", async () => {
+    const out = await chat(["talk to shiva", "price of blue diamond", "contact the owner", "do you ship to Kochi?", "conect to shiva"]);
+    assert.equal(out[0]!.reply, ANSWERS.humanPush);
+    assert.equal(out[2]!.reply, ANSWERS.humanPushShort);
+    assert.equal(out[4]!.reply, ANSWERS.humanPushFirm);
+  });
+  it("'are you a bot?' and typed numbers count as pushes too", async () => {
+    const out = await chat(["are you a bot?", "call me", "9845012345"]);
+    assert.ok(out[0]!.reply.endsWith(ANSWERS.humanPush));
+    assert.equal(out[1]!.reply, ANSWERS.humanPushShort);
+    assert.equal(out[2]!.reply, ANSWERS.humanPushFirm);
+    assert.equal(out[2]!.state.lead.phone, undefined);
+  });
+  it("a 20-push session: no two consecutive bot replies are identical; each canned steer is used once", async () => {
+    const msgs = [
+      "Connect to Shiva", "can I talk to the owner", "please connect me with him", "talk to a human", "I want to speak with the owner",
+      "is this a bot?", "put me through", "get me shiva", "call me", "9845012345", "how do I contact the owner", "speek to shiva",
+      "reach shiva", "Shiva please", "give me your number", "connect me to shiva", "contact shiva", "real person please", "tlak to shiva", "urgent connect me",
+    ];
+    const out = await chat(msgs);
+    for (let i = 1; i < out.length; i++) assert.notEqual(out[i]!.reply, out[i - 1]!.reply, `turns ${i - 1}/${i}: ${msgs[i]}`);
+    assert.equal(out.filter((r) => r.reply.includes(ANSWERS.humanPush)).length, 1);
+    assert.equal(out.filter((r) => r.reply.includes(ANSWERS.humanPushShort)).length, 1);
+    for (const r of out) {
+      assert.equal(r.state.handoff.active, false);
+      assert.doesNotMatch(r.reply, /didn't catch that/);
+      assertClean(r.reply);
+    }
+    assert.equal(out.at(-1)!.state.humanPushes, 20);
+  });
+  it("over HTTP: a long push session never stores a lead or sends an alert; replies never repeat back to back", async () => {
+    const store = createMemoryChatStore();
+    const alerts: LeadForAlert[] = [];
+    const deps = { store, catalog: liveCatalog(), sendAlert: async (lead: LeadForAlert) => { alerts.push(lead); return { sent: true, channel: "console" as const }; } };
+    const sid = "3f2b8c1e-9a4d-4e2f-8b6a-00000000b151";
+    const replies: string[] = [];
+    for (const message of ["Connect to Shiva", "Ravi", "can I talk to the owner", "9845012345", "please connect me with him", "put me through", "get me the owner", "call shiva"]) {
+      const res = await handleChatRequest(post({ sessionId: sid, message, source: "site" }), deps);
+      assert.equal(res.status, 200);
+      replies.push(((await res.json()) as { reply: string }).reply);
+    }
+    for (let i = 1; i < replies.length; i++) assert.notEqual(replies[i], replies[i - 1]);
+    assert.equal(alerts.length, 0);
+    assert.ok(!store.leads.get(sid)?.completed);
+  });
+});
+
+describe("LB-14: connect / talk / speak / call / reach / contact / put me through", () => {
+  const PUSHES = [
+    "Connect to Shiva", "connect me to shiva", "conect to shiva", "Connect with the owner", "connect me with him", "please connect me with him",
+    "connect to manager", "Connect to a human please", "pls connect shiva", "can u connect me to shiva", "CONNECT TO SHIVA",
+    "can I talk to the owner", "talk to shiva", "talk to owner pls", "i wanna talk to shiva", "let me talk to a human", "tlak to shiva",
+    "speak to shiva", "I want to speak with the owner", "can I speak to someone", "speak with a person", "speek to shiva", "I'd like to speak to shiva",
+    "call shiva", "can I call the owner", "I want to call someone", "can someone call me",
+    "reach shiva", "how can I reach shiva", "how do I reach the owner", "reach out to the owner",
+    "contact shiva", "how do I contact the owner", "how can I contact you", "can I contact someone", "contact the owner", "contct shiva", "how to contact shiva",
+    "put me through to the owner", "put me through to shiva", "put me through", "get me shiva", "get me the owner", "get me someone", "get me a human", "get me the manager",
+    "can i get in touch with shiva", "get in touch with the owner", "Shiva please", "i need to talk to the manager", "conect me to the owner", "plz connect to someone",
+  ];
+  it(`${PUSHES.length} phrasings are recognised`, () => assert.ok(PUSHES.length >= 40));
+  for (const p of PUSHES) {
+    it(`'${p}' -> the first-ask steer (counts toward LB-15)`, async () => {
+      const r = await one(p);
+      assert.equal(r.intent, "human_push", p);
+      assert.equal(r.reply, ANSWERS.humanPush);
+      assert.ok(r.reply.startsWith("I understand you'd like to reach Shiva"));
+      assert.match(r.reply, /self-explanatory/);
+      assert.equal(r.state.humanPushes, 1);
+      assert.equal(r.state.handoff.active, false);
+    });
+  }
+  const controls: Array<[string, (r: Awaited<ReturnType<typeof one>>) => void]> = [
+    ["how do I contact you about a dead fish", (r) => assert.equal(r.intent, "loss_safety_net")],
+    ["my fish arrived dead, how do I contact shiva", (r) => assert.equal(r.intent, "loss_safety_net")],
+    ["can I call to visit the store", (r) => assert.equal(r.intent, "visit")],
+    ["can I visit the store?", (r) => assert.equal(r.intent, "visit")],
+    ["when will the fish reach me?", (r) => assert.notEqual(r.intent, "human_push")],
+    ["how long to reach Kochi by train?", (r) => assert.notEqual(r.intent, "human_push")],
+    ["how do I connect the filter?", (r) => assert.notEqual(r.intent, "human_push")],
+    ["get me a pair of blue diamond", (r) => assert.notEqual(r.intent, "human_push")],
+    ["I will talk to my wife and then order", (r) => assert.notEqual(r.intent, "human_push")],
+    ["do you speak tamil?", (r) => assert.notEqual(r.intent, "human_push")],
+    ["who is the owner?", (r) => assert.notEqual(r.intent, "human_push")],
+  ];
+  for (const [m, check] of controls) {
+    it(`control: '${m}' is not hijacked`, async () => check(await one(m)));
+  }
+  it("isReachAsk unit cases (typos within one letter; short verbs only swapped letters)", () => {
+    for (const t of ["conect to shiva", "connnect to shiva", "contcat the owner", "speek to someone", "tlak to shiva", "clal shiva"]) assert.ok(isReachAsk(t), t);
+    for (const t of ["walk to the store", "tell shiva thanks", "tall blue diamond", "reach kochi", "teach me care"]) assert.ok(!isReachAsk(t), t);
+  });
+});
+
+describe("LB-13: pleasantries get a warm reply, then fish or frozen foods", () => {
+  const Q = ANSWERS.handoffAskLookingFor;
+  const greetings = ["hi", "Hi", "hello", "hey", "hey there", "hi there!", "hii", "good morning", "good evening sir", "vanakkam", "namaste", "hello shiva", "Hello team"];
+  for (const g of greetings) {
+    it(`greeting '${g}' -> welcome + fish-or-food`, async () => {
+      const r = await one(g);
+      assert.equal(r.reply, `${ANSWERS.welcomeGreeting} ${Q}`);
+      assert.equal(r.state.pendingOffer, "lookingFor");
+    });
+  }
+  for (const n of ["I'm new", "Hey - I am new Discus Hobbyist!", "new hobbyist", "beginner here", "I'm a new hobbyist", "I am new to discus", "im a beginner", "newbie here", "hi, I'm a new discus keeper"]) {
+    it(`intro '${n}' -> welcome to the hobby + fish-or-food (no name captured)`, async () => {
+      const r = await one(n);
+      assert.equal(r.reply, `${ANSWERS.welcomeNewHobbyist} ${Q}`);
+      assert.equal(r.state.lead.name, undefined);
+    });
+  }
+  for (const t of ["thanks", "thank you", "thank you so much", "okay thank you", "thx"]) {
+    it(`thanks '${t}' -> you're welcome + fish-or-food`, async () => {
+      assert.equal((await one(t)).reply, `${ANSWERS.youreWelcome} ${Q}`);
+    });
+  }
+  for (const b of ["bye", "ok bye", "thanks bye", "goodbye", "see you", "good night"]) {
+    it(`bye '${b}' -> thanks for visiting (no question)`, async () => {
+      const r = await one(b);
+      assert.equal(r.reply, ANSWERS.bye);
+      assert.equal(r.state.pendingOffer, null);
+    });
+  }
+  const routes: Array<[string, string]> = [
+    ["fish", ANSWERS.lookingForFish], ["Discus fish", ANSWERS.lookingForFish], ["live discus please", ANSWERS.lookingForFish],
+    ["frozen foods", ANSWERS.lookingForFood], ["Discus frozen foods", ANSWERS.lookingForFood], ["pellets", ANSWERS.lookingForFood], ["food", ANSWERS.lookingForFood],
+    ["both", ANSWERS.lookingForBoth], ["not sure", ANSWERS.lookingForBoth],
+  ];
+  for (const [ans, pointer] of routes) {
+    it(`'hi' then '${ans}' -> the right site pages and steps`, async () => {
+      const [, r] = await chat(["hi", ans]);
+      assert.equal(r!.reply, pointer);
+      assert.equal(r!.state.handoff.active, false);
+    });
+  }
+  it("fish pointer = Current Stock (/available); food pointer = /frozen + /pellets; same Shopping Bag steps", () => {
+    assert.match(ANSWERS.lookingForFish, /Current Stock \(thediscusden\.com\/available\)/);
+    assert.match(ANSWERS.lookingForFood, /thediscusden\.com\/frozen[\s\S]*thediscusden\.com\/pellets/);
+    for (const p of [ANSWERS.lookingForFish, ANSWERS.lookingForFood]) assert.match(p, /Shopping Bag, tap Finalize and Place request/);
+  });
+  it("a pleasantry with a real question answers the question (no hijack)", async () => {
+    const checks: Array<[string, string]> = [
+      ["hi, price of blue diamond?", "welcome"], ["hello, can I visit the store?", "welcome"], ["hi I want to buy discus", "welcome"],
+      ["thanks, how much is shipping?", "thanks"], ["hey, connect me to shiva", "welcome"], ["hi, my fish arrived dead", "welcome"],
+      ["hello, do you ship to Kochi?", "welcome"], ["I'm new, how do I order?", "welcome_new"],
+    ];
+    for (const [m, notIntent] of checks) {
+      const r = await one(m);
+      assert.notEqual(r.intent, notIntent, m);
+      assert.ok(!r.reply.endsWith(Q), m);
+    }
+    assert.equal((await one("hi, price of blue diamond?")).intent.startsWith("price"), true);
+    assert.equal((await one("hey, connect me to shiva")).intent, "human_push");
+    assert.equal((await one("hi, my fish arrived dead")).intent, "loss_safety_net");
+  });
+  it("after the greeting, an unrelated question is answered normally", async () => {
+    const [, r] = await chat(["hi", "do you ship to Kochi?"]);
+    assert.notEqual(r!.intent, "looking_for");
+    assert.equal(r!.state.pendingOffer === "lookingFor", false);
+  });
+  it("the question is asked once per session; later pleasantries don't repeat it", async () => {
+    const out = await chat(["hi", "fish", "thanks", "hello", "I'm new"]);
+    assert.equal(out[2]!.reply, ANSWERS.thanks);
+    assert.equal(out[3]!.reply, ANSWERS.welcome);
+    assert.ok(!out[4]!.reply.includes(Q));
+  });
+  it("the answer prefills a later genuine handoff (not asked twice)", async () => {
+    const out = await chat(["hi", "frozen foods", "Can I visit the store?", "yes", "Ravi"]);
+    assert.equal(out.at(-1)!.reply, ANSWERS.handoffAskPhone("Ravi"));
+    assert.equal(out.at(-1)!.state.lead.lookingFor, "Discus frozen foods");
+  });
+  it("explicit first-order questions keep the LB-6 steps + SOP", async () => {
+    for (const m of ["first time ordering, how does it work?", "I'm from Bangalore, first order", "I'm new here, how does it work?"]) {
+      const r = await one(m);
+      assert.equal(r.intent, "first_timer", m);
+      assert.ok(r.reply.startsWith(ANSWERS.ordering), m);
+    }
+  });
+  it("new replies are warm and brief, no exclamation marks, pass the guard", () => {
+    for (const s of [ANSWERS.welcomeGreeting, ANSWERS.welcomeNewHobbyist, ANSWERS.youreWelcome, ANSWERS.bye]) {
+      assert.ok(NO_BANG(s), s);
+      assert.equal(guardReply(s).text, s);
+      assertClean(s);
+      assert.ok(s.length < 200, s);
+    }
+  });
+  it("pleasantryOnly unit cases", () => {
+    assert.equal(pleasantryOnly("hey - i am new discus hobbyist!"), "new");
+    assert.equal(pleasantryOnly("thanks bye"), "bye");
+    assert.equal(pleasantryOnly("hi, price of blue diamond?"), null);
+    assert.equal(pleasantryOnly("ok"), null);
+  });
+  it("over HTTP: a pleasantry-only session stores no lead and sends no alert", async () => {
+    const store = createMemoryChatStore();
+    const alerts: LeadForAlert[] = [];
+    const deps = { store, catalog: liveCatalog(), sendAlert: async (lead: LeadForAlert) => { alerts.push(lead); return { sent: true, channel: "console" as const }; } };
+    const sid = "3f2b8c1e-9a4d-4e2f-8b6a-00000000b131";
+    for (const message of ["hi", "fish", "thanks", "I'm a new hobbyist", "bye"]) {
+      assert.equal((await handleChatRequest(post({ sessionId: sid, message, source: "site" }), deps)).status, 200);
+    }
+    assert.equal(alerts.length, 0);
+    assert.equal(store.leads.get(sid), undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Kiara's quick test of 8a88e4e (lb-quick-8a88e4e-2026-10-03.md): every failing case.
+// ---------------------------------------------------------------------------
+describe("Kiara 8a88e4e: LB-14 typo and 'human' misses", () => {
+  const KIARA_MISSES = ["conect me", "cal shiva", "taalk to owner", "I need a human now"];
+  const KIARA_PASSES = [
+    "connect to shiva", "Connect to Shiva", "talk to the owner", "speak to a human", "call shiva", "phone shiva", "contact shiva", "reach the owner",
+    "how can I reach shiva", "put me through to someone", "can I get in touch with the owner", "connect me with someone", "contact owner please",
+    "can i call the owner", "tlak to shiva", "spek to owner", "conect to shivaa", "speek to human", "rech shiva", "contct owner",
+  ];
+  // dropped / doubled / wrong / swapped letters for each verb, + me / Shiva / owner / someone / person / human / manager / him
+  const TYPOS = [
+    "conect me", "connnect to shiva", "conmect to the owner", "cnonect me with him", "conect me to the manager",
+    "cal shiva", "calll the owner", "clal someone", "cal me", "cll shiva",
+    "taalk to owner", "tak to shiva", "tlak to a person", "talkk to a human", "tallk to the manager",
+    "spek to shiva", "speeak to the owner", "spaek to someone", "speek to a human", "sepak to him",
+    "contct shiva", "conntact the owner", "contatc someone", "cantact a person", "contacct the manager",
+    "rech shiva", "reeach the owner", "raech someone", "reah him", "reach a human",
+  ];
+  const HUMAN = ["I need a human now", "need a real person", "want a human", "human please", "any human there?", "is there a human?", "i want a real person", "need a person to talk to", "a real person?"];
+  for (const m of [...KIARA_MISSES, ...KIARA_PASSES, ...TYPOS, ...HUMAN]) {
+    it(`'${m}' -> the first-ask steer`, async () => {
+      const r = await one(m);
+      assert.equal(r.intent, "human_push", m);
+      assert.equal(r.reply, ANSWERS.humanPush);
+      assert.equal(r.state.handoff.active, false);
+    });
+  }
+  const CONTROLS: Array<[string, string | null]> = [
+    ["how do I contact you about a dead fish", "loss_safety_net"],
+    ["can I call to visit the store", "visit"],
+    ["walk to the store", null],
+    ["tall blue diamond", null],
+    ["when will the fish reach me?", null],
+    ["who will contact me?", null],
+    ["can my friend collect the fish for me in Chennai?", null],
+    ["I need a person to collect the fish at the station", null],
+    ["can you teach someone to keep discus?", null],
+    ["is it all for me?", null],
+  ];
+  for (const [m, intent] of CONTROLS) {
+    it(`control: '${m}' is not a push`, async () => {
+      const r = await one(m);
+      if (intent) assert.equal(r.intent, intent, m);
+      else assert.notEqual(r.intent, "human_push", m);
+    });
+  }
+  it("Kiara's mixed LB-15 session: 'I need a human now' is the 4th push, not a fallback", async () => {
+    const out = await chat(["Connect to Shiva", "can I talk to the owner", "please connect me with him", "I need a human now", "just let me speak to Shiva"]);
+    for (const r of out) assert.equal(r.intent, "human_push");
+    assert.equal(out[2]!.reply, ANSWERS.humanPushFirm);
+    assert.equal(out[3]!.reply, firmPushReply(1));
+    assert.equal(out[4]!.reply, firmPushReply(2));
+  });
+});
+
+describe("Kiara 8a88e4e: LB-13 'new here' intros", () => {
+  for (const m of ["im new here", "I'm new here", "I'm new here too", "new here, hi", "new to this hobby", "new to discus", "hi im new", "new here", "I am new to the hobby"]) {
+    it(`'${m}' -> new-hobbyist welcome + fish-or-food (no SOP, no 'didn't catch')`, async () => {
+      const r = await one(m);
+      assert.equal(r.reply, `${ANSWERS.welcomeNewHobbyist} ${ANSWERS.handoffAskLookingFor}`);
+      assert.doesNotMatch(r.reply, /didn't catch|holding tank|Everything is on our website/);
+      assert.equal(r.state.lead.name, undefined);
+    });
+  }
+  it("'im new here' then 'frozen food' -> /frozen + /pellets pointer", async () => {
+    const [, r] = await chat(["im new here", "frozen food"]);
+    assert.equal(r!.reply, ANSWERS.lookingForFood);
+  });
+});
+
+describe("Kiara 8a88e4e: LB-15 never repeats any earlier reply", () => {
+  it("40 consecutive pushes: every reply unique, no '!', polite, form + Shiva as owner, no handoff", async () => {
+    const base = ["I want to talk to Shiva", "Connect to Shiva", "call me", "conect me", "I need a human now", "put me through", "contact the owner", "taalk to owner"];
+    const msgs = Array.from({ length: 40 }, (_, i) => base[i % base.length]!);
+    const out = await chat(msgs);
+    const replies = out.map((r) => r.reply);
+    assert.equal(new Set(replies).size, replies.length, "all 40 replies unique");
+    for (const r of out.slice(2)) {
+      assert.ok(NO_BANG(r.reply));
+      for (const step of ["thediscusden.com", "Shopping Bag", "Finalize", "Place request"]) assert.ok(r.reply.includes(step), step);
+      assert.match(r.reply, /the owner, Shiva|Shiva, (the|our) owner/i);
+      assert.equal(r.state.handoff.active, false);
+      assert.equal(guardReply(r.reply).text, r.reply);
+      assertClean(r.reply);
+    }
+    assert.equal(out[2]!.reply, ANSWERS.humanPushFirm, "3rd push is Shiva's wording");
+  });
+  it("no push reply equals any earlier bot reply, even with other questions in between", async () => {
+    const msgs: string[] = [];
+    for (let i = 0; i < 15; i++) msgs.push(i % 3 === 0 ? "price of blue diamond" : i % 3 === 1 ? "talk to shiva" : "are you a bot?");
+    const out = await chat(msgs);
+    const seen = new Set<string>();
+    out.forEach((r, i) => {
+      if (msgs[i] !== "price of blue diamond") assert.ok(!seen.has(r.reply), `turn ${i}`);
+      seen.add(r.reply);
+    });
+  });
+  it("the composition never repeats (first 5000 indices unique) and every part passes the guard", () => {
+    const all = Array.from({ length: 5000 }, (_, k) => firmPushReply(k));
+    assert.equal(new Set(all).size, all.length);
+    for (const t of all.slice(0, 1600)) {
+      assert.equal(guardReply(t).text, t);
+      assert.ok(NO_BANG(t));
+      assertClean(t);
+    }
+    assert.equal(firmPushReply(0), ANSWERS.humanPushFirm);
+    assert.ok(FIRM_CLOSINGS.every((c) => /Shiva/.test(c)));
+  });
+});
+
+describe("Kiara 8a88e4e: food asks link /frozen and /pellets, not /in-the-den", () => {
+  for (const m of ["do you sell frozen food?", "bloodworms?", "pellets?", "what food do you have"]) {
+    for (const [label, cat] of [["live", liveCatalog()], ["offline", brokenCatalog()]] as const) {
+      it(`'${m}' (${label} catalog)`, async () => {
+        const r = await one(m, cat);
+        assert.match(r.reply, /thediscusden\.com\/frozen/);
+        assert.match(r.reply, /thediscusden\.com\/pellets/);
+        assert.doesNotMatch(r.reply, /in-the-den/);
+      });
+    }
+  }
+  it("no canned answer points to /in-the-den", () => {
+    for (const [k, v] of Object.entries(ANSWERS)) {
+      const text = typeof v === "function" ? (v as (n?: string) => string)("Ravi") : v;
+      assert.doesNotMatch(text, /in-the-den/, k);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LB-18 (Shiva, 3 Oct): delivery-timing asks -> depends on location + train route,
+// then the LB-6 SOP (reused), then Chennai pickup. Never a day/hour count.
+// ---------------------------------------------------------------------------
+describe("LB-18: delivery timing", () => {
+  const GENERAL = `${ANSWERS.deliveryTiming}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`;
+  const PHRASES = [
+    // English
+    "When will the fish reach me?", "how long does delivery take?", "when will I get my fish?", "delivery time?", "what is the delivery time?",
+    "when will it arrive?", "when do I receive the fish?", "how soon can I get them?", "how many days for delivery?", "estimated delivery?",
+    "ETA?", "how fast is shipping?", "how long does shipping take?", "by when will the fish reach?", "how long will the fish be on the train?",
+    "shipping time please", "what's the transit time?",
+    // Tanglish
+    "eppo varum?", "fish eppo varum", "delivery eppo?", "evlo naal aagum?", "ethana naal la varum?", "eppo kedaikkum?", "meen eppo vandhu serum?",
+    // Hinglish
+    "kab tak milega?", "kitne din mein aayega?", "kab aayega?", "kab milega fish?", "delivery kab hogi?", "fish kab pahunchegi?",
+  ];
+  it(`${PHRASES.length} phrasings`, () => assert.ok(PHRASES.length >= 25));
+  for (const p of PHRASES) {
+    it(`'${p}' -> timing + SOP + Chennai pickup`, async () => {
+      const r = await one(p);
+      assert.equal(r.intent, "delivery_timing", p);
+      assert.equal(r.reply, GENERAL);
+      assert.equal(r.state.handoff.active, false);
+      assert.equal(r.state.pendingOffer, null);
+    });
+  }
+  const IN_STATES: Array<[string, string]> = [
+    ["how many days to reach Bangalore?", "Bangalore"], ["how many days to Bangalore?", "Bangalore"], ["how long will it take to reach Kochi?", "Kochi"],
+    ["how long for delivery to Hyderabad?", "Hyderabad"], ["how long to Mumbai by train?", "Mumbai"], ["when will it reach Madurai?", "Madurai"],
+    ["how long does it take to Pune?", "Pune"], ["Coimbatore ku eppo varum?", "Coimbatore"], ["Bhubaneswar tak kitne din?", "Bhubaneswar"],
+  ];
+  for (const [p, place] of IN_STATES) {
+    it(`in the 8 states: '${p}' names ${place}`, async () => {
+      const r = await one(p);
+      assert.equal(r.intent, "delivery_timing_place", p);
+      assert.equal(r.reply, `${deliveryTimingFor(place)}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`);
+    });
+  }
+  it("a state name only ('how many days does delivery take to Kerala?') -> the general timing line + SOP", async () => {
+    const r = await one("How many days does delivery take to Kerala?");
+    assert.equal(r.reply, GENERAL);
+  });
+  for (const p of ["delivery time to Chennai?", "when will it reach me in Chennai?", "how long to get fish in Chennai?"]) {
+    it(`Chennai: '${p}' leads with store pickup`, async () => {
+      const r = await one(p);
+      assert.equal(r.intent, "delivery_timing_chennai", p);
+      assert.equal(r.reply, ANSWERS.deliveryTimingChennai);
+    });
+  }
+  for (const [p, place, abroad] of [["when will it reach Kolkata?", "Kolkata", false], ["how many days to Delhi?", "Delhi", false], ["when will it reach Dubai?", "Dubai", true]] as const) {
+    it(`outside the 8 states: '${p}' -> LB-6 care-first handoff (no refusal wording)`, async () => {
+      const r = await one(p);
+      assert.equal(r.reply, outOfAreaReply(place, abroad));
+      assert.equal(r.state.pendingOffer, "handoff");
+      assert.ok(!guardReply(r.reply).blocked.length);
+    });
+  }
+  it("timing replies never promise hours or days of travel, and pass the guard", async () => {
+    for (const p of [...PHRASES, ...IN_STATES.map(([q]) => q), "delivery time to Chennai?"]) {
+      const r = await one(p);
+      assert.doesNotMatch(r.reply.replace(SOP_BLOCK, ""), /\b\d+\s*(hours?|hrs?|days?)\b|\b(one|two|three|same|next)[\s-]+(day|days|hours?)\b|overnight/i, p);
+      assert.equal(guardReply(r.reply).text, r.reply);
+      assertClean(r.reply);
+    }
+  });
+  const CONTROLS: Array<[string, string]> = [
+    ["when will it ship?", "ship_how"], ["when do you ship?", "ship_how"], ["when will you dispatch?", "ship_how"], ["how do you ship?", "ship_how"],
+    ["how will I know you got my order?", "order_received"], ["when will shiva contact me?", "order_received"], ["when will I hear from shiva?", "order_received"],
+    ["how long can you hold my fish?", "holding"], ["how many days do you quarantine?", "quarantine"],
+    ["call me", "human_push"], ["Connect to Shiva", "human_push"], ["when can I talk to shiva?", "human_push"], ["conect me", "human_push"],
+    ["my fish arrived dead", "loss_safety_net"],
+  ];
+  for (const [p, intent] of CONTROLS) {
+    it(`control: '${p}' -> ${intent}`, async () => assert.equal((await one(p)).intent, intent, p));
+  }
+  for (const p of ["how long to acclimate the fish?", "how long do discus live?", "when will blue diamond arrive in stock?"]) {
+    it(`control: '${p}' is not a timing ask`, async () => assert.ok(!(await one(p)).intent.startsWith("delivery_timing"), p));
+  }
+  it("over HTTP: timing asks store no lead and send no alert", async () => {
+    const store = createMemoryChatStore();
+    const alerts: LeadForAlert[] = [];
+    const deps = { store, catalog: liveCatalog(), sendAlert: async (lead: LeadForAlert) => { alerts.push(lead); return { sent: true, channel: "console" as const }; } };
+    const sid = "3f2b8c1e-9a4d-4e2f-8b6a-00000000b181";
+    for (const message of ["When will the fish reach me?", "how many days to Bangalore?", "delivery time to Chennai?", "eppo varum?", "kab tak milega?"]) {
+      assert.equal((await handleChatRequest(post({ sessionId: sid, message, source: "site" }), deps)).status, 200);
+    }
+    assert.equal(alerts.length, 0);
+    assert.ok(!store.leads.get(sid)?.completed);
+  });
+  it("inside a handoff, a timing question is answered and the same field is asked again", async () => {
+    const t = await viaHandoff(["Ravi", "fish", "9845012345", "Chennai", "when will the fish reach me?"]);
+    assert.ok(t.at(-1)!.reply.endsWith(ANSWERS.handoffAskDelivery));
+    assert.ok(t.at(-1)!.reply.startsWith(ANSWERS.deliveryTiming));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Kiara's quick test of 25a82a7 (lb-quick-25a82a7-2026-10-03.md): misspelt timing asks.
+// ---------------------------------------------------------------------------
+describe("Kiara 25a82a7: LB-18 typos and short forms", () => {
+  const GENERAL = `${ANSWERS.deliveryTiming}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`;
+  const placeReply = (p: string) => `${deliveryTimingFor(p)}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`;
+  // Her 16 phrasings, verbatim: [message, expected reply]
+  const KIARA: Array<[string, string]> = [
+    ["wen will fish reach me", GENERAL],
+    ["delivry time to bangalore", placeReply("Bangalore")],
+    ["how mny days to hyderabad", placeReply("Hyderabad")],
+    ["hw long shiping to kochi", placeReply("Kochi")],
+    ["delivary time", GENERAL],
+    ["how lng to pune", placeReply("Pune")],
+    ["wen will it arive", GENERAL],
+    ["shiping time to mumbai", placeReply("Mumbai")],
+    ["how many dys to kochi", placeReply("Kochi")],
+    ["when will fish reech bangalore", placeReply("Bangalore")],
+    ["fish reach when?", GENERAL],
+    ["when fish come", GENERAL],
+    ["when wil my fish reach", GENERAL],
+    ["how long delivery", GENERAL],
+    ["how many days delivery", GENERAL],
+    ["delivery tym to chennai", ANSWERS.deliveryTimingChennai],
+  ];
+  for (const [m, reply] of KIARA) {
+    it(`Kiara: '${m}'`, async () => {
+      const r = await one(m);
+      assert.ok(r.intent.startsWith("delivery_timing"), `${m} -> ${r.intent}`);
+      assert.equal(r.reply, reply);
+      assert.doesNotMatch(r.reply, /didn't catch/);
+    });
+  }
+  it("'delivery tym to chennai' = 'delivery time to Chennai'", async () => {
+    assert.equal((await one("delivery tym to chennai")).reply, (await one("delivery time to Chennai")).reply);
+  });
+  const MORE = [
+    "how many day reach", "dlvry tym?", "wen wil it cum", "shpng time to madurai", "hw mny d8s to bangalore", "fish wen reach",
+    "how long shipng take", "hw lng 4 delivery", "when wil fish arrive", "wen fish cum", "how mny days delivry", "delivry time",
+    "wen will my order reach", "when will my parcel come", "arrive when?", "deliveri time to coimbatore", "whn will the fish reach",
+    "dilivery tym", "how meny days to reach kochi", "wen wil my fish arrve", "shipping tym?", "delevery time pls",
+  ];
+  for (const m of MORE) {
+    it(`typo variant: '${m}' -> timing`, async () => {
+      const r = await one(m);
+      assert.ok(r.intent.startsWith("delivery_timing"), `${m} -> ${r.intent}`);
+      assert.ok(r.reply.includes("depends on") || r.reply === ANSWERS.deliveryTimingChennai);
+    });
+  }
+  const CONTROLS: Array<[string, (i: string) => boolean]> = [
+    ["when fish come back in stock", (i) => !i.startsWith("delivery_timing")],
+    ["when will blue diamond come in stock", (i) => !i.startsWith("delivery_timing")],
+    ["when will new fish come?", (i) => !i.startsWith("delivery_timing")],
+    ["wen is the next batch coming", (i) => !i.startsWith("delivery_timing")],
+    ["when did the fish come to you?", (i) => !i.startsWith("delivery_timing")],
+    ["when the fish come, should I switch off lights?", (i) => !i.startsWith("delivery_timing")],
+    ["how many days to acclimate?", (i) => !i.startsWith("delivery_timing")],
+    ["how long shopping bag stays", (i) => !i.startsWith("delivery_timing")],
+    ["when can I come to the store?", (i) => i === "visit"],
+    ["when will it ship", (i) => i === "ship_how"],
+    ["wen will it ship", (i) => i === "ship_how"],
+    ["when do you deliver", (i) => i === "ship_how"],
+    ["my fish arrived dead", (i) => i === "loss_safety_net"],
+    ["wen will my fish arrive, last one arrived dead", (i) => i === "loss_safety_net"],
+    ["call me", (i) => i === "human_push"],
+    ["conect me", (i) => i === "human_push"],
+    ["whn can i talk to shiva", (i) => i === "human_push"],
+    ["when will shiva contact me", (i) => i === "order_received"],
+    ["when will my request reach shiva", (i) => i === "order_received"],
+    ["meen eppo vandhu serum?", (i) => i === "delivery_timing"],
+  ];
+  for (const [m, ok] of CONTROLS) {
+    it(`control: '${m}'`, async () => {
+      const r = await one(m);
+      assert.ok(ok(r.intent), `${m} -> ${r.intent}`);
+    });
+  }
+  it("timingNorm maps short forms and typos, leaves other words alone", () => {
+    assert.equal(timingNorm("wen wil it arive"), "when will it arrive");
+    assert.equal(timingNorm("hw mny d8s"), "how many days");
+    assert.equal(timingNorm("dlvry tym"), "delivery time");
+    assert.equal(timingNorm("shopping bag"), "shopping bag");
+    assert.equal(timingNorm("serum"), "serum");
+    assert.equal(timingNorm("teach"), "teach");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Kiara's re-test of 387ccb5 (lb-quick-387ccb5-2026-10-03.md): "how many days to
+// <unknown / misspelt place>" and bare "hw mny dayz" fall back to the timing reply.
+// ---------------------------------------------------------------------------
+describe("Kiara 387ccb5: timing fallback for unknown and misspelt places", () => {
+  const GENERAL = `${ANSWERS.deliveryTiming}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`;
+  const placeReply = (p: string) => `${deliveryTimingFor(p)}\n\n${SOP_BLOCK}\n\n${ANSWERS.deliveryTimingPickup}`;
+  const CASES: Array<[string, string]> = [
+    // her failing phrasings, verbatim
+    ["hw mny dayz to banglore", placeReply("Bangalore")],
+    ["how many days to banglore", placeReply("Bangalore")],
+    ["hw mny days to banglore", placeReply("Bangalore")],
+    ["how many days to some small town", GENERAL],
+    ["hw mny dayz", GENERAL],
+    // her Low gap
+    ["shpping tim to hydrabad", placeReply("Hyderabad")],
+    // variants: unknown / gibberish places -> general reply (never the out-of-area handoff)
+    ["how many days to xyzzyq", GENERAL],
+    ["how many days to my village", GENERAL],
+    ["how long to Thiruvarur?", GENERAL],
+    ["hw lng to kumbakonam", GENERAL],
+    ["how many dais to my town", GENERAL],
+    ["how long will it take", GENERAL],
+    ["how many days?", GENERAL],
+    // misspelt known cities -> city line / Chennai pickup
+    ["how many days to chenai", ANSWERS.deliveryTimingChennai],
+    ["how long to kochin", placeReply("Kochi")],
+    ["how many dais to mumbaai", placeReply("Mumbai")],
+    ["how long to thanjavr", placeReply("Thanjavur")],
+    ["how many days for delivery to vizagg", placeReply("Vizag")],
+    ["hw lng to mysor", placeReply("Mysore")],
+    ["delivery time to hydrabad?", placeReply("Hyderabad")],
+    ["how many dys to coimbatur", placeReply("Coimbatore")],
+  ];
+  for (const [m, reply] of CASES) {
+    it(`'${m}'`, async () => {
+      const r = await one(m);
+      assert.equal(r.reply, reply, m);
+      assert.equal(r.state.pendingOffer, null, "no handoff offer for an unknown or in-state place");
+    });
+  }
+  for (const [m, place] of [["when will it reach kolkatta", "Kolkata"], ["how many days to kolkatta?", "Kolkata"], ["how long to guwahatti", "Guwahati"]] as const) {
+    it(`misspelt out-of-area city: '${m}' -> care-first handoff for ${place}`, async () => {
+      const r = await one(m);
+      assert.equal(r.reply, outOfAreaReply(place, false));
+      assert.equal(r.state.pendingOffer, "handoff");
+    });
+  }
+  it("'how many days to bengaluru' names the place as typed (a known alias)", async () => {
+    assert.equal((await one("how many days to bengaluru")).reply, placeReply("Bengaluru"));
+  });
+  const CONTROLS: Array<[string, (i: string) => boolean]> = [
+    ["how many days to acclimate?", (i) => !i.startsWith("delivery_timing")],
+    ["how long to feed them", (i) => !i.startsWith("delivery_timing")],
+    ["how long to wait after ordering?", (i) => !i.startsWith("delivery_timing")],
+    ["how long to get a reply?", (i) => !i.startsWith("delivery_timing")],
+    ["how long to thaw frozen food?", (i) => !i.startsWith("delivery_timing")],
+    ["how many days to hold?", (i) => i === "holding"],
+    ["how long to quarantine?", (i) => i === "quarantine"],
+    ["how many days to pay the balance?", (i) => i === "pay_advance"],
+    ["when fish come back in stock", (i) => !i.startsWith("delivery_timing")],
+    ["when will it ship", (i) => i === "ship_how"],
+    ["when can I come to the store?", (i) => i === "visit"],
+    ["my fish arrived dead", (i) => i === "loss_safety_net"],
+    ["call me", (i) => i === "human_push"],
+    ["Connect to Shiva", (i) => i === "human_push"],
+    ["thanks, can I visit the store?", (i) => i === "visit"],
+  ];
+  for (const [m, ok] of CONTROLS) {
+    it(`control: '${m}'`, async () => {
+      const r = await one(m);
+      assert.ok(ok(r.intent), `${m} -> ${r.intent}`);
+    });
+  }
+  it("findPlaceFuzzy: only after a place word, same first letter, 1-2 letters off; never guesses common words", () => {
+    assert.equal(findPlaceFuzzy("to banglore")?.name, "bangalore");
+    assert.equal(findPlaceFuzzy("to kolkatta")?.name, "kolkata");
+    assert.equal(findPlaceFuzzy("banglore"), null, "no place word in front");
+    assert.equal(findPlaceFuzzy("to thanks"), null);
+    assert.equal(findPlaceFuzzy("to some small town"), null);
+    assert.equal(findPlaceFuzzy("to xyzzyq"), null);
   });
 });

@@ -13,6 +13,8 @@
 
 import {
   ANSWERS,
+  firmPushReply,
+  deliveryTimingFor,
   OWNER_FALLBACK,
   outOfAreaReply,
   ownerReply,
@@ -22,14 +24,22 @@ import {
   type LeadFlag,
 } from "./answers.ts";
 import type { CatalogLoader, FoodItem, StrainCard } from "./catalog.ts";
-import { findPlace, type Place } from "./places.ts";
+import { findPlace, findPlaceFuzzy, type Place } from "./places.ts";
 
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
-export type HandoffStep = "name" | "phone" | "city" | "pairSingle" | "delivery" | "timeline";
-const HANDOFF_ORDER: HandoffStep[] = ["name", "phone", "city", "pairSingle", "delivery", "timeline"];
+/**
+ * LB-11 (Shiva, 3 Oct): "pair or single" is gone. "lookingFor" (Discus fish or
+ * Discus frozen foods) is asked right after the name, so the LB-7 alert, which
+ * fires on the turn the number arrives, already carries it.
+ */
+export type HandoffStep = "name" | "lookingFor" | "phone" | "city" | "delivery" | "timeline";
+const HANDOFF_ORDER: HandoffStep[] = ["name", "lookingFor", "phone", "city", "delivery", "timeline"];
+export const LOOKING_FISH = "Discus fish";
+export const LOOKING_FOOD = "Discus frozen foods";
+export const LOOKING_BOTH = "Discus fish and frozen foods";
 
 export type LeadData = {
   name?: string;
@@ -37,7 +47,8 @@ export type LeadData = {
   city?: string;
   stateName?: string;
   inShipStates?: boolean | null;
-  pairSingle?: string;
+  /** LB-11: "Discus fish" / "Discus frozen foods" / both / free text. */
+  lookingFor?: string;
   delivery?: string;
   timeline?: string;
 };
@@ -52,7 +63,7 @@ export type ChatState = {
   v: 1;
   turns: number;
   /** What the last bot reply offered: a handoff, or narrowing the list. */
-  pendingOffer: "handoff" | "narrow" | null;
+  pendingOffer: "handoff" | "narrow" | "lookingFor" | null;
   handoff: {
     active: boolean;
     step?: HandoffStep;
@@ -61,6 +72,10 @@ export type ChatState = {
     declined: HandoffStep[];
     /** Set after the FAQ 26 reply ("Shall I pass your details to him?"): next message may be yes/no. */
     awaitingConsent?: boolean;
+    /** LB-11: steps that make no sense for this handoff (e.g. fish-or-food on a DOA claim). */
+    skip?: HandoffStep[];
+    /** LB-11: unclear fish-or-food answers re-asked once. */
+    lookingTries?: number;
   };
   lead: LeadData;
   tags: LeadTags;
@@ -70,6 +85,15 @@ export type ChatState = {
   completed: boolean;
   /** LB-6: how many times the visitor pushed to reach a human (steered to the site). */
   humanPushes?: number;
+  /**
+   * LB-11: what the last handoff offer was about, so "yes" sets up the right slots:
+   * "claim" (DOA / sick / mortality: no fish-or-food question), "fish" (already about fish).
+   */
+  handoffKind?: "claim" | "fish";
+  /** LB-13: fish-or-food answer given after a pleasantry (prefills a later handoff; not a lead by itself). */
+  lookingForHint?: string;
+  /** LB-13: the fish-or-food question was already asked after a pleasantry this session. */
+  askedLookingFor?: boolean;
 };
 
 export function newChatState(): ChatState {
@@ -428,18 +452,38 @@ export function parseName(raw: string): string | null {
   return titleCase(s.toLowerCase());
 }
 
-function parsePairSingle(t: string): string | null {
+const FOOD_WORD = /\b(frozen|foods?|pellets?|heart\s+mix|bloodworms?|blood\s+worms?|feed|saapadu|unavu|khana)\b/;
+const FISH_WORD = /\b(fish|fishes|meen|live\s+discus|discus\s+fish)\b|\bdiscus\b(?!\s+(frozen|foods?|pellets?|feed))/;
+
+/** LB-11: "Are you looking for Discus fish or Discus frozen foods?" */
+function parseLookingFor(t: string): string | null {
+  if (/\b(both|everything|rendum|dono)\b/.test(t)) return LOOKING_BOTH;
+  const food = FOOD_WORD.test(t);
+  const fish = FISH_WORD.test(t.replace(/\bdiscus\s+(frozen\s+)?(foods?|pellets?)\b/g, " "));
+  if (food && fish) return LOOKING_BOTH;
+  if (food) return LOOKING_FOOD;
+  if (fish || /^(the\s+)?(first|former|live)\b|\bfish\s+only\b/.test(t)) return LOOKING_FISH;
+  if (/^(the\s+)?(second|latter)\b/.test(t)) return LOOKING_FOOD;
   if (/\b(not\s+sure|don'?t\s+know|undecided|either|maybe)\b/.test(t)) return "not sure";
-  if (/\b(pair|pairs|two|2\s*(fish|nos|pcs)?|couple)\b/.test(t)) return "pair";
-  if (/\b(single|one|1\s*(fish|no|pc)?|just\s+one)\b/.test(t)) return "single";
-  if (/\b(group|school|several|many|[3-9]|\d{2})\b/.test(t)) return `group (${t.slice(0, 40)})`;
   return null;
 }
+
+/** LB-11: the pointer after the fish-or-food answer (live site pages, 3 Oct 12:25 IST). */
+function lookingForPointer(v: string | undefined): string | undefined {
+  if (v === LOOKING_FISH) return ANSWERS.lookingForFish;
+  if (v === LOOKING_FOOD) return ANSWERS.lookingForFood;
+  if (v === LOOKING_BOTH) return ANSWERS.lookingForBoth;
+  return undefined;
+}
+
+/** LB-9: "I'll visit" / "I will come" / "naan varen" at the delivery step = Chennai pickup. */
+const VISIT_ANSWER =
+  /\b(i'?ll|i\s+will|i\s+can|i\s+shall|we'?ll|we\s+will|will|gonna|going\s+to|planning\s+to)\s+(come|visit|drop\s+by|stop\s+by|walk\s+in|pick\s?-?up|collect)\b|\b(visit|visiting|in\s+person|walk[\s-]?in|self\s+pick\w*|store\s+pickup|come\s+(over|down|personally|to\s+(the|your)\s+(store|shop|place|den))|i'?m\s+coming|coming\s+(over|personally|to\s+(the|your)\s+(store|shop|place|den))|direct(ly)?\s+(come|varen|visit))\b|\b(naan|naane|naa|nan|nanu|naanga)\s+(varen|vaaren|varuven|vandhu\w*|varom|varuvom)\b|\b(varen|vaaren|varuven|neril\s+varen|nerla\s+varen|nera\s+varen|kadaikku\s+varen|vandhu\s+(vaangi|edu|eduth|collect)\w*|main\s+aaunga|aa\s+jaunga|khud\s+aaunga)\b/;
 
 function parseDelivery(t: string): string | null {
   if (/\b(not\s+sure|don'?t\s+know|either|any|both)\b/.test(t)) return "not sure";
   if (/\b(train|rail|railway|ship|shipping|parcel|courier|send)\b/.test(t)) return "train shipping";
-  if (/\b(pick\s?-?up|pickup|collect|come\s+(and\s+)?(take|get)|chennai)\b/.test(t)) return "Chennai pickup";
+  if (/\b(pick\s?-?up|pickup|collect|come\s+(and\s+)?(take|get)|chennai)\b/.test(t) || VISIT_ANSWER.test(t)) return "Chennai pickup";
   return null;
 }
 
@@ -458,8 +502,8 @@ function looksLikeAnswer(step: HandoffStep, raw: string, t: string): boolean {
       return extractIndianMobile(raw) !== null || digitCount(raw) >= 7;
     case "city":
       return findPlace(t) !== null || (!raw.includes("?") && t.split(" ").length <= 4 && /^[\p{L}\s.,'-]+$/u.test(raw.trim()));
-    case "pairSingle":
-      return parsePairSingle(t) !== null;
+    case "lookingFor":
+      return parseLookingFor(t) !== null;
     case "delivery":
       return parseDelivery(t) !== null;
     case "timeline":
@@ -498,8 +542,9 @@ function prefillFromMessage(state: ChatState, raw: string, t: string): void {
       if (place.zone === "remote" || place.zone === "abroad") addFlag(state, "REMOTE");
     }
   }
-  if (!lead.pairSingle && /\b(a\s+pair|pair\s+of|single\s+fish|one\s+fish)\b/.test(t)) {
-    lead.pairSingle = /\bpair\b/.test(t) ? "pair" : "single";
+  // LB-11: an explicit "frozen food" / "discus fish" mention fills the fish-or-food slot.
+  if (!lead.lookingFor && !state.handoff.skip?.includes("lookingFor") && (FOOD_WORD.test(t) || /\b(discus\s+fish|live\s+(fish|discus))\b/.test(t))) {
+    lead.lookingFor = parseLookingFor(t) ?? undefined;
   }
   if (!lead.delivery && /\b(train\s+shipping|by\s+train|chennai\s+pickup|pick\s?up\s+in\s+chennai)\b/.test(t)) {
     lead.delivery = /\btrain\b/.test(t) ? "train shipping" : "Chennai pickup";
@@ -507,10 +552,18 @@ function prefillFromMessage(state: ChatState, raw: string, t: string): void {
   if (!lead.timeline && /\btank\s+(is\s+)?(ready|cycled|set\s+up)\b/.test(t)) lead.timeline = "tank ready now";
 }
 
+/** Steps not to ask on this handoff (declined, skipped for the path, or not relevant). */
+function skipStep(state: ChatState, step: HandoffStep): boolean {
+  if (state.handoff.declined.includes(step) || state.handoff.skip?.includes(step)) return true;
+  if (step === "delivery" && state.lead.inShipStates === false) return true;
+  // LB-11: "is your tank ready?" means nothing to a frozen-food-only buyer.
+  if (step === "timeline" && state.lead.lookingFor === LOOKING_FOOD) return true;
+  return false;
+}
+
 function nextStep(state: ChatState): HandoffStep | null {
   for (const step of HANDOFF_ORDER) {
-    if (state.handoff.declined.includes(step)) continue;
-    if (step === "delivery" && state.lead.inShipStates === false) continue;
+    if (skipStep(state, step)) continue;
     if (!state.lead[step]) return step;
   }
   return null;
@@ -524,8 +577,8 @@ function askFor(step: HandoffStep, state: ChatState): string {
       return ANSWERS.handoffAskPhone(state.lead.name);
     case "city":
       return ANSWERS.handoffAskCity;
-    case "pairSingle":
-      return ANSWERS.handoffAskPairSingle;
+    case "lookingFor":
+      return ANSWERS.handoffAskLookingFor;
     case "delivery":
       return ANSWERS.handoffAskDelivery;
     case "timeline":
@@ -570,8 +623,7 @@ function advance(state: ChatState, prefix?: string): Turn {
 function nextStepAfterName(state: ChatState): HandoffStep | null {
   for (const step of HANDOFF_ORDER) {
     if (step === "name") continue;
-    if (state.handoff.declined.includes(step)) continue;
-    if (step === "delivery" && state.lead.inShipStates === false) continue;
+    if (skipStep(state, step)) continue;
     if (!state.lead[step]) return step;
   }
   return null;
@@ -581,7 +633,15 @@ function join(...parts: Array<string | undefined>): string {
   return parts.filter((p) => p && p.trim()).join("\n\n");
 }
 
-function startHandoff(state: ChatState, raw: string, prefix?: string): Turn {
+/** LB-11: per-path slot setup (see HANDOFF_KIND). */
+function applyHandoffKind(state: ChatState, kind: ChatState["handoffKind"]): void {
+  state.handoff.skip = kind === "claim" ? ["lookingFor"] : [];
+  if (kind === "fish") state.lead.lookingFor ??= LOOKING_FISH;
+  // LB-13: already answered after a greeting -> don't ask again.
+  if (kind !== "claim" && state.lookingForHint && state.lookingForHint !== "not sure") state.lead.lookingFor ??= state.lookingForHint;
+}
+
+function startHandoff(state: ChatState, raw: string, prefix?: string, kind: ChatState["handoffKind"] = state.handoffKind): Turn {
   if (state.completed) {
     state.pendingOffer = null;
     return { reply: join(prefix, ANSWERS.handoffAlreadyDone), intent: "handoff_already_done" };
@@ -589,6 +649,7 @@ function startHandoff(state: ChatState, raw: string, prefix?: string): Turn {
   state.handoff.active = true;
   state.handoff.phoneTries = 0;
   state.handoff.declined = [];
+  applyHandoffKind(state, kind);
   state.pendingOffer = null;
   prefillFromMessage(state, raw, norm(raw));
   return advance(state, prefix);
@@ -893,12 +954,163 @@ const HUMAN_PUSH = new RegExp(
     String.raw`\b(owner|shiva|ungal\s+owner|anna)\s+kitta\s+(pesa\w*|pesu\w*|connect|call)\b|\b(owner|shiva)\s+(number|contact)\s+(kudunga|kudu|venum|tharunga|anuppunga)\b|\b(pesanum|pesa\s+venum|pesa\s+mudiyuma|pesalama|pesunga)\b|\bcall\s+(pannunga|pannu|panna\s+mudiyuma|pannalama)\b|\b(aal|aalu|manushan)\s+(venum|kitta)\b`,
   ].join("|"),
 );
+// ---------------------------------------------------------------------------
+// LB-14 (Shiva, 3 Oct): "Connect to Shiva", "put me through", "get me the owner",
+// "how do I contact the owner"... with typos ("conect", "speek", "tlak").
+// ---------------------------------------------------------------------------
+const REACH_TARGET = new Set(["shiva", "siva", "shivaa", "sivaa", "owner", "ownr", "onwer", "owener", "someone", "somebody", "anyone", "anybody", "person", "human", "humans", "manager", "him", "staff", "boss", "agent", "proprietor", "team"]);
+const REACH_LONG = ["connect", "contact", "speak", "reach"];
+const REACH_SHORT = ["talk", "call", "ring", "ping", "phone"];
+/** Verbs whose object may be "you" ("how can I contact you"); "talk to you about tanks" is not a push. */
+const REACH_YOU = new Set(["connect", "contact", "reach", "call", "phone", "ring"]);
+/** Verbs whose object may be "me" ("conect me", "call me"); "the fish reach me" is not a push. */
+const REACH_ME = new Set(["connect", "call", "phone", "ring"]); // not "contact": "who will contact me?" is B6
+
+/** Damerau-Levenshtein distance (words are short, so this stays fast). */
+function editDistance(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 1) return 2;
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0]![j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+    }
+  }
+  return d[a.length]![b.length]!;
+}
+function sortedLetters(w: string): string {
+  return [...w].sort().join("");
+}
+/** "taalk" -> "talk", "connnect" -> "connect": collapse runs of the same letter. */
+function squeeze(w: string): string {
+  return w.replace(/(.)\1+/g, "$1");
+}
+/** w is v with exactly one letter left out ("cal" for "call", "conect" for "connect"). */
+function droppedOne(w: string, v: string): boolean {
+  if (w.length !== v.length - 1) return false;
+  for (let i = 0; i < v.length; i++) if (v.slice(0, i) + v.slice(i + 1) === w) return true;
+  return false;
+}
+/**
+ * The reach verb a word stands for. Long verbs (connect, contact, speak, reach): exact,
+ * doubled letters, or one dropped / wrong / swapped letter. Short verbs (talk, call...):
+ * exact, doubled letters ("taalk"), one dropped letter ("cal") or a swapped pair ("tlak"),
+ * but never a different letter, so "walk", "tall" and "tell" stay out.
+ */
+function reachVerb(w: string): string | null {
+  const base = w.replace(/(ing|ed|s)$/, "");
+  for (const v of [...REACH_LONG, ...REACH_SHORT]) if (w === v || base === v || squeeze(w) === squeeze(v)) return v;
+  // Typos keep the first letter ("teach", "beach", "all", "walk" never count).
+  if (w.length >= 4) {
+    for (const v of REACH_LONG) {
+      if (w[0] !== v[0]) continue;
+      if (editDistance(w, v) <= 1 || editDistance(base, v) <= 1 || editDistance(squeeze(w), v) <= 1) return v;
+    }
+  }
+  for (const v of REACH_SHORT) {
+    if (w[0] !== v[0]) continue;
+    if (w.length === v.length && sortedLetters(w) === sortedLetters(v) && editDistance(w, v) === 1) return v;
+    if (w.length >= 3 && (droppedOne(w, v) || droppedOne(squeeze(w), v))) return v;
+  }
+  return null;
+}
+const REACH_PHRASE =
+  /\bput\s+(me|us)\s+through\b|\bget\s+(me|us)\s+(through\s+to\s+|to\s+)?(the\s+|a\s+|an\s+|some\s+)?(shiva|siva|owner|someone|somebody|person|human|manager|boss|staff|him|real\s+person)\b|\b(get|be|keep)\s+in\s+touch\b|^(shiva|siva)(\s+(please|pls|plz|sir|anna|now))?$|^(the\s+)?(owner|human|a\s+human|real\s+person|manager|a\s+person)\s+(please|pls|plz|now)$/;
+/** LB-14 (Kiara 8a88e4e): "I need a human now", "want a real person", "human please", "any human there?". */
+const HUMAN_ASK =
+  /\b(need|want|get|give|send|bring)\s+(me\s+)?(a\s+|an\s+|some\s+|to\s+(talk|speak|chat)\s+(to|with)\s+(a\s+)?)?(real\s+|actual\s+|live\s+|proper\s+)?(human|person|human\s+being|people)\b(?!\s+(to|for|who|at)\s+(?!(talk|speak|chat|help)\b))|\b(human|real\s+person|person)\s+(please|pls|plz|now|asap|here|needed)\b|\b(any|a|some)\s*(human|real\s+person|person|one|body)\s+(there|here|around|available|online)\b|\bis\s+there\s+(a\s+|any\s+)?(human|real\s+person|person|anyone|anybody|someone)\b|^(human|a\s+human|real\s+person|a\s+real\s+person)\s*\??$/;
+/** An explicit person in the message (used to keep "can I call to visit the store" on the visit answer). */
+const PERSON_WORD = /\b(shiva|siva|owner|someone|somebody|anyone|person|human|manager|him|staff|boss|agent)\b/;
+
+/** LB-14: an ask to reach Shiva / a person that the LB-6 patterns miss. */
+export function isReachAsk(t: string): boolean {
+  if (REACH_PHRASE.test(t) || HUMAN_ASK.test(t)) return true;
+  const words = t.replace(/[^a-z' ]/g, " ").split(/\s+/).filter(Boolean);
+  for (let i = 0; i < words.length; i++) {
+    const verb = reachVerb(words[i]!);
+    if (!verb) continue;
+    for (const w of words.slice(i + 1, i + 6)) {
+      if (REACH_TARGET.has(w.replace(/'s$/, ""))) return true;
+      if ((w === "you" || w === "u") && REACH_YOU.has(verb)) return true;
+      if (w === "me" && REACH_ME.has(verb)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * LB-15 (Shiva, 3 Oct 12:49 PM): 1st push = full steer, 2nd = short steer, 3rd = the
+ * polite "Understood. Kindly place your requirement..." reply, 4th+ = rotate its variants.
+ * Never the same reply twice in a row; never a handoff.
+ */
+function pushReply(state: ChatState): string {
+  const n = (state.humanPushes = (state.humanPushes ?? 0) + 1);
+  if (n === 1) return ANSWERS.humanPush;
+  if (n === 2) return ANSWERS.humanPushShort;
+  return firmPushReply(n - 3);
+}
+
+// ---------------------------------------------------------------------------
+// LB-13: pleasantries (greeting / thanks / bye / "I'm new") on their own.
+// A pleasantry with a real question ("hi, price of blue diamond?") is not one.
+// ---------------------------------------------------------------------------
+type Pleasantry = "greeting" | "thanks" | "bye" | "new";
+const PLEASANTRY: Array<[Pleasantry, RegExp]> = [
+  ["bye", /\b(bye(\s+bye)?|byee+|goodbye|good\s+bye|see\s+(you|u|ya)(\s+(later|soon|again))?|good\s*night|tata|take\s+care|catch\s+you\s+later|cya)\b/g],
+  ["thanks", /\b(thanks?(\s+(a\s+lot|so\s+much|very\s+much|again|a\s+ton))?|thank\s+(you|u)(\s+(so|very)\s+much|\s+a\s+lot)?|thanku|thankyou|thx|thnx|thanx|tnx|ty|nandri|dhanyavad|shukriya|much\s+appreciated|appreciate\s+it)\b/g],
+  ["new", /\b((i'?m|i\s+am|im|am)\s+(a\s+|an\s+)?(new|beginner|newbie|novice|fresher|starter)(\s+(discus\s+)?(hobbyist|keeper|aquarist|fish\s*keeper|here|to\s+(the\s+)?(discus|hobby|fishkeeping|fish\s+keeping|this\s+hobby|discus\s+keeping)))?|(new|beginner|newbie|novice)\s+(discus\s+)?(hobbyist|keeper|aquarist|fish\s*keeper)(\s+here)?|(beginner|newbie|new)\s+here|new\s+to\s+(this\s+|the\s+)?(discus|hobby|fishkeeping|fish\s+keeping|aquariums?|discus\s+keeping|this)|just\s+(started|starting|getting\s+started)(\s+with\s+discus)?)\b/g],
+  ["greeting", /\b(hi+|hello+|helo|hey+|hai|hiya|heya|howdy|vanakkam|namaste|namaskaram|namaskar|good\s+(morning|afternoon|evening|day)|gm|hola|greetings)\b/g],
+];
+const PLEASANTRY_FILLER =
+  /\b(there|sir|madam|mam|maam|team|shiva|siva|anna|bro|all|everyone|guys|folks|friend|friends|dear|ji|ok|okay|oh|so|and|very|much|again|the|discus|den|from|here|just|a|an|to|you|too|i|am|im|i'm|really|nice|great|cool|lovely|wonderful)\b/g;
+
+/** LB-13: which pleasantry this message is, if it is nothing but pleasantries. */
+export function pleasantryOnly(t: string): Pleasantry | null {
+  let rest = t;
+  const kinds = new Set<Pleasantry>();
+  for (const [kind, re] of PLEASANTRY) {
+    rest = rest.replace(re, () => {
+      kinds.add(kind);
+      return " ";
+    });
+  }
+  if (!kinds.size) return null;
+  rest = rest.replace(PLEASANTRY_FILLER, " ").replace(/[^a-z0-9]+/g, "");
+  if (rest) return null;
+  for (const k of ["bye", "new", "thanks", "greeting"] as const) if (kinds.has(k)) return k;
+  return null;
+}
+
+function pleasantryReply(state: ChatState, kind: Pleasantry): Turn {
+  state.pendingOffer = null;
+  // Bye: just a warm goodbye (a question would read oddly as they leave).
+  if (kind === "bye") return { reply: ANSWERS.bye, intent: "bye" };
+  const known = state.askedLookingFor || state.lookingForHint || state.lead.lookingFor || state.handoff.active;
+  const lead = kind === "new" ? ANSWERS.welcomeNewHobbyist : kind === "thanks" ? ANSWERS.youreWelcome : ANSWERS.welcomeGreeting;
+  const intent = kind === "new" ? "welcome_new" : kind === "thanks" ? "thanks" : "welcome";
+  if (known) {
+    return { reply: kind === "thanks" ? ANSWERS.thanks : kind === "new" ? `${ANSWERS.welcomeNewHobbyist} How can I help?` : ANSWERS.welcome, intent };
+  }
+  state.askedLookingFor = true;
+  state.pendingOffer = "lookingFor";
+  return { reply: `${lead} ${ANSWERS.handoffAskLookingFor}`, intent };
+}
+
+/** LB-13: the answer to the fish-or-food question asked after a pleasantry. */
+function lookingForAnswer(t: string): string | null {
+  if (t.split(" ").length > 6 || /\?/.test(t)) return null;
+  const v = parseLookingFor(t);
+  return v && (lookingForPointer(v) || v === "not sure") ? v : null;
+}
+
 /** LB-6 B3: "can I order on chat itself?" -> No, orders go through the site. */
 const ORDER_IN_CHAT =
   /\b(order|buy|book|purchase|reserve)\s+(it\s+|them\s+|fish\s+)?(on|in|through|via|over|using|from)\s+(the\s+|this\s+)?(chat|chatbot|bot|whatsapp|here)\b|\b(can|could|may|do)\s+(i|we)\s+(just\s+)?(order|buy|book|purchase)\s+(here|right\s+here|now\s+here|from\s+you\s+here)\b|\b(can|could|will)\s+(you|u)\s+(take|book|place|note)\s+(my|the|an|our)\s+order\b|\b(take|book|place)\s+(my|the|an)\s+order\s+(here|on\s+chat|in\s+chat|via\s+chat)\b|\bchat\s+(itself|la\s+order|mein\s+order)\b|\bchat\s+(la|le|mein|me)\s+(order|book)\w*/;
 /** LB-6 B6: "how will I know you got my order?" -> Place request notifies Shiva, who contacts you. */
 const ORDER_RECEIVED =
-  /\bhow\s+(will|would|do|can|shall)\s+i\s+know\b[^?.]*\b(order|request|got\s+it|received|placed|went\s+through)\b|\b(did|have|has)\s+(you|u|shiva|the\s+den)\s+(get|got|receive|received|seen?)\s+(my|our|the)\s+(order|request)\b|\b(will|do)\s+(i|we)\s+get\s+(a\s+|any\s+)?(confirmation|notification|reply|call\s+back|message)\b|\bwhat\s+happens\s+(after|once|when)\s+(i\s+)?(place|order|placing|tap|submit)\w*|\b(order|request)\s+(confirmation|status|received)\b|\b(is|was)\s+my\s+(order|request)\s+(received|placed|confirmed|through)\b|\bwho\s+(will\s+)?(contact|call|reply\s+to)\s+me\b/;
+  /\bhow\s+(will|would|do|can|shall)\s+i\s+know\b[^?.]*\b(order|request|got\s+it|received|placed|went\s+through)\b|\b(did|have|has)\s+(you|u|shiva|the\s+den)\s+(get|got|receive|received|seen?)\s+(my|our|the)\s+(order|request)\b|\b(will|do)\s+(i|we)\s+get\s+(a\s+|any\s+)?(confirmation|notification|reply|call\s+back|message)\b|\bwhat\s+happens\s+(after|once|when)\s+(i\s+)?(place|order|placing|tap|submit)\w*|\b(order|request)\s+(confirmation|status|received)\b|\b(is|was)\s+my\s+(order|request)\s+(received|placed|confirmed|through)\b|\bwho\s+(will\s+)?(contact|call|reply\s+to)\s+me\b|\bwhen\s+(will|would|does|do)\s+(shiva|he|you|someone|the\s+den)\s+(contact|call|reply\s+to|message|get\s+back\s+to)\s+(me|us)\b|\bwhen\s+(will|do)\s+i\s+hear\s+(from|back)\b|\b(order|request)\s+(will\s+)?(reach|reaches|get\s+to|go\s+to)\s+(shiva|him|you)\b/;
 /** LB-6 C7: collecting at the railway station is SOP step 4, not Chennai store pickup. */
 const STATION = /\b(railway|station|platform|rail\s+agent|train\s+agent|porter|ported)\b/;
 /** LB-6 C5: full amount / advance questions -> the SOP payment step. */
@@ -908,7 +1120,7 @@ const PAY_SPLIT =
 const SMALL_TALK =
   /\b(just\s+(chatting|browsing|bored|checking\s+(in|you\s+out))|favou?rite\s+(fish|discus|strain|colou?r|one)|how\s+are\s+(you|u)|how'?s\s+it\s+going|what'?s\s+up|wassup|lol|lmao|haha+|bored|time\s?pass|who\s+made\s+you|do\s+you\s+like\s+(fish|discus))\b/;
 const FIRST_TIMER =
-  /\b(first[\s-]?time(r)?\s+(buyer|buying|customer|order|ordering|here|purchase|with\s+you)|my\s+first\s+(order|purchase|time)|first\s+order|i'?m\s+(a\s+)?first[\s-]?timer|i'?m\s+new\s+(here|to\s+(this|the\s+den|ordering|buying|your\s+shop))|never\s+(bought|ordered)\s+(from|here|before)|new\s+customer|how\s+does\s+(it|this|the\s+(process|order\w*))\s+work|what\s+(is|'s)\s+the\s+process)\b/;
+  /\b(first[\s-]?time(r)?\s+(buyer|buying|customer|order|ordering|here|purchase|with\s+you)|my\s+first\s+(order|purchase|time)|first\s+order|i'?m\s+(a\s+)?first[\s-]?timer|i'?m\s+new\s+to\s+(ordering|buying)|never\s+(bought|ordered)\s+(from|here|before)|new\s+customer|how\s+does\s+(it|this|the\s+(process|order\w*))\s+work|what\s+(is|'s)\s+the\s+process)\b/;
 /** "Keep the fish longer" asks: only these get the 7-days-free / ₹100-a-day line. */
 const KEEP_LONGER =
   /\b(longer|later|more\s+days|extra\s+days|few\s+(more\s+)?(days|weeks)|until|till|for\s+a\s+(week|while|few)|tank\s+(is\s+)?(not|isn'?t)\s+ready|not\s+ready\s+yet|keep\s+them\s+for|hold\s+(them|it|my\s+fish)\s+for)\b/;
@@ -922,14 +1134,113 @@ const SHIP_WORD =
 const GENERIC_PLACE = /^(abroad|overseas|outside india|out of india|international|internationally|foreign|outside the country|other countries|another country)$/;
 const UPPER_PLACE: Record<string, string> = { uae: "UAE", usa: "USA", uk: "UK" };
 /** LB-6 (Shiva, 3 Oct): outside the 8 train states -> care-first, tentative handoff offer. Never a refusal. */
-function outOfArea(place: Place): string {
+function outOfArea(state: ChatState, place: Place): string {
   const name = GENERIC_PLACE.test(place.name) ? undefined : UPPER_PLACE[place.name] ?? titleCase(place.name);
+  // LB-7 follow-up: the alert goes out once name + number are in, so keep the place the
+  // visitor already named for the email (and don't ask for the city again).
+  if (name) {
+    state.lead.city ??= name;
+    state.lead.inShipStates = false;
+  }
   return outOfAreaReply(name, place.zone === "abroad");
 }
 
-function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean } = {}): Turn {
+/**
+ * LB-18 (Shiva, 3 Oct): delivery-timing asks ("when will the fish reach me?", "how many
+ * days to Bangalore?", "eppo varum?", "kab tak milega?"). Not "when will it ship?" (C4,
+ * dispatch day) and not hold / quarantine-length questions.
+ */
+const DELIVERY_TIMING = new RegExp(
+  [
+    String.raw`\b(when|by\s+when|how\s+soon|how\s+long|how\s+many\s+(days|hours)|how\s+fast|what\s+day|which\s+day)\b[^?.!]*\b(reach|reaches|reached|arrive|arrives|arrival|delivered|receive|get\s+(my|the|them|it|those|these)\b|come\s+to\s+me|take\s+to\s+(reach|arrive|come|get)|delivery\s+take|shipping\s+take|transit|journey|by\s+train|on\s+the\s+train)`,
+    String.raw`\b(how\s+many\s+days|how\s+long|how\s+soon|how\s+fast)\s+(for|4|is|does|will)?\s*(the\s+)?(delivery|shipping|transit)\b`,
+    String.raw`\b(delivery|shipping|transit|arrival|travel)\s+(time|timing|timings|duration|date|days|period|eta)\b|\bestimated\s+(delivery|arrival)\b|\beta\b|\bhow\s+fast\s+is\s+(the\s+)?(shipping|delivery)\b`,
+    // Tanglish: eppo varum / epo kedaikkum / evlo naal aagum / ethana naal la varum
+    String.raw`\b(eppo|eppa|epo|yeppo|eppodhu|eppothu)\b[^?.!]*\b(varum|varuma|varumaa|kedaikkum|kidaikkum|kedaikum|serum|reach|delivery|vandhu\s+serum)\b|\b(varum|kedaikkum|kidaikkum|serum)\s+(eppo|epo|eppa)\b|\b(evlo|evvalavu|evlavu|evalo|ethana|ethanai|ethanai)\s+(naal|nal|naalu|days|day)\b|\bdelivery\s+(eppo|epo)\b`,
+    // Hinglish: kab tak milega / kitne din mein aayega / delivery kab hogi
+    String.raw`\bkab\s+(tak\s+)?(milega|milegi|milenge|aayega|aayegi|aaega|ayega|aayenge|pahunchega|pahunchegi|pahuchega|aa\s+jayega|aa\s+jaega|deliver)\b|\b(milega|milegi|aayega|ayega|pahunchega)\s+kab\b|\b(kitne|kitna|ketne)\s+(din|dino|time|samay|ghante)\b|\bdelivery\s+kab\b`,
+  ].join("|"),
+);
+/** "how many days to Bangalore?" / "how long to Mumbai by train?" (only with a known place). */
+const TIMING_TO_PLACE = /\bhow\s+(long|many\s+days?|many\s+hours)\s+((does|will)\s+it\s+take\s+)?(to|for|till|until)\s+/;
+/**
+ * LB-18 (Kiara 387ccb5): "how many days to <anything>" is a timing ask even when the place is
+ * unknown or misspelt ("to banglore", "to some small town"), unless what follows "to" is an
+ * action ("how long to acclimate / feed / wait").
+ */
+const TIMING_TO_ACTION =
+  /\bhow\s+(long|many\s+days?|many\s+hours)\s+((does|will)\s+it\s+take\s+)?(to|for|till|until)\s+(acclimat\w*|feed\w*|wait\w*|keep\w*|cycle|cycling|settle|set|setup|change|cook|thaw|defrost|pay|reply|respond|answer|confirm|process|prepare|hold|fast|grow|breed|recover|heal|treat|quarantin\w*|get\s+(a\s+)?(reply|response|answer|confirmation)|hear|see|show|colou?r|eat|adjust|adapt|float|mature|spawn|clean|fill|start|finish|decide|book|order|place)\b/;
+/** "hw mny dayz?" / "how long will it take?" with nothing else. */
+const TIMING_BARE = /^(so\s+|and\s+|ok\s+)?how\s+(many\s+days?|long\s+(will|does)\s+it\s+take)\s*\??$/;
+// LB-18 typos (Kiara 25a82a7): "wen will fish reach me", "delivry time", "hw long shiping",
+// "fish reach when?", "when fish come". Word-order variants on the normalised text.
+const TIMING_ORDER =
+  /\b(reach|reaches|arrive|arrives|come|comes|delivery|delivered|get\s+(it|them|my\s+fish|the\s+fish))\s+(when|by\s+when)\b|\bwhen\b[^?.!]*\b(fish|it|they|order|parcel|discus|fishes)\s+(will\s+)?(come|reach|arrive|get\s+here)\b|\bhow\s+many\s+days?\s+(will\s+it\s+|to\s+)?(reach|arrive|come|delivery)\b/;
+/** SMS short forms and common misspellings of the timing words (explicit: short words are never fuzzy-matched). */
+const TIMING_SHORT: Record<string, string> = {
+  wen: "when", whn: "when", wn: "when", wehn: "when", whne: "when", whan: "when",
+  tym: "time", tme: "time", tim: "time", tyme: "time", timee: "time",
+  hw: "how", hww: "how", hoow: "how",
+  mny: "many", meny: "many", mani: "many", manny: "many", mnay: "many",
+  dys: "days", dayz: "days", dyas: "days", d8s: "days", daays: "days", dais: "days", dayss: "days",
+  lng: "long", lnog: "long", lomg: "long", lon: "long", longg: "long",
+  dlvry: "delivery", dlvy: "delivery", dlivery: "delivery", delvry: "delivery", dilivery: "delivery", delevery: "delivery", delivry: "delivery",
+  shpng: "shipping", shpg: "shipping", shippin: "shipping", shiping: "shipping", shippng: "shipping",
+  rch: "reach", rech: "reach", reech: "reach", raech: "reach", reah: "reach",
+  arive: "arrive", arrve: "arrive", ariv: "arrive", arival: "arrival",
+  cum: "come", kum: "come", cme: "come", coem: "come",
+  wil: "will", wll: "will", wiil: "will",
+  gt: "get", gte: "get",
+};
+const TIMING_LONG = ["delivery", "shipping", "arrive", "arrival", "reach"];
+/** Words that look like a timing word but aren't ("shopping bag", "deliver" is fine as is). */
+const TIMING_NOT = new Set(["shopping", "shipped", "react", "teach", "delicious", "deliver", "delivers", "delivered", "arrived", "reached"]);
+function timingWord(w: string): string {
+  if (TIMING_SHORT[w]) return TIMING_SHORT[w]!;
+  if (w.length < 5 || TIMING_NOT.has(w)) return w;
+  for (const v of TIMING_LONG) {
+    if (w[0] !== v[0] || w === v) continue;
+    const limit = v.length >= 8 ? 2 : 1;
+    if (levenshtein(squeeze(w), v) <= limit || levenshtein(w, v) <= limit) return v;
+  }
+  return w;
+}
+/** Plain Levenshtein distance (uncapped; editDistance above returns 2 for "2 or more"). */
+function levenshtein(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length]!;
+}
+/** LB-18: the message with timing-vocabulary typos and short forms mapped to the real words. */
+export function timingNorm(t: string): string {
+  return t.replace(/[a-z0-9]+/g, (w) => timingWord(w));
+}
+
+const NOT_TIMING = /\b(back\s+in\s+stock|in\s+stock|restock\w*|come\s+back|available\s+again|new\s+(fish|stock|batch|arrivals?|strains?)|next\s+(batch|lot|stock)|when\s+did|acclimat\w*|(should|do|can)\s+i\s+(switch|turn|feed|keep|add|put|float|open|change)|hold|holding|keep\s+(them|my\s+fish|the\s+fish)|quarantin\w*|fast(ed|ing)?\s+(them|the\s+fish|for)|grow|live|lifespan|refund|claim)\b|\bwhen\s+(will|do|would|does)\s+(you|it|they|the\s+fish)\s+(ship|dispatch|send)\b(?![^?.!]*\b(reach|arrive|get\s+to)\b)/;
+
+function deliveryTimingAnswer(state: ChatState, t: string): Turn {
+  state.pendingOffer = null;
+  // LB-18: a misspelt known city ("banglore", "kolkatta") counts; an unknown place gets the general reply.
+  const place = findPlace(t) ?? findPlaceFuzzy(t);
+  if (place && CHENNAI.test(place.name)) {
+    state.lead.stateName ??= place.state;
+    return { reply: ANSWERS.deliveryTimingChennai, intent: "delivery_timing_chennai" };
+  }
+  if (place && place.zone !== "in") return shippingAnswer(state, t, { place }); // LB-6 care-first handoff (never a refusal)
+  if (place) state.lead.stateName ??= place.state;
+  const lead = place && !/^(tamil nadu|tamilnadu|kerala|karnataka|andhra pradesh|telangana|maharashtra|madhya pradesh|odisha|orissa)$/.test(place.name)
+    ? deliveryTimingFor(titleCase(place.name))
+    : ANSWERS.deliveryTiming;
+  return { reply: join(lead, SOP_BLOCK, ANSWERS.deliveryTimingPickup), intent: place ? "delivery_timing_place" : "delivery_timing" };
+}
+
+function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean; place?: Place } = {}): Turn {
   const withSop = (opts.sop ?? true) && !CHENNAI.test(t);
-  const place = findPlace(t);
+  const place = opts.place ?? findPlace(t);
   if (place) {
     state.lead.stateName ??= place.state;
     if (place.zone === "in") {
@@ -939,10 +1250,10 @@ function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean } = {
     }
     addFlag(state, "OUTSIDE 8 STATES");
     state.pendingOffer = "handoff";
-    if (place.zone === "other") return { reply: outOfArea(place), intent: "ship_other_state" };
+    if (place.zone === "other") return { reply: outOfArea(state, place), intent: "ship_other_state" };
     addFlag(state, "REMOTE");
-    if (place.zone === "remote") return { reply: outOfArea(place), intent: "ship_remote" };
-    return { reply: outOfArea(place), intent: "ship_abroad" };
+    if (place.zone === "remote") return { reply: outOfArea(state, place), intent: "ship_remote" };
+    return { reply: outOfArea(state, place), intent: "ship_abroad" };
   }
   state.pendingOffer = null;
   return { reply: withSop ? join(ANSWERS.shipInStates, SOP_BLOCK) : ANSWERS.shipInStates, intent: "ship_general" };
@@ -967,7 +1278,7 @@ function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean } = {
 //   6. fallback - FAQ 24 clarifying question (never "I'm not sure").
 // ---------------------------------------------------------------------------
 
-type Msg = { state: ChatState; raw: string; t: string; ctx: Ctx; offTopic: boolean };
+type Msg = { state: ChatState; raw: string; t: string; ctx: Ctx; offTopic: boolean; lookingForPending?: boolean };
 type RuleTier = "safety" | "offer" | "faq" | "smalltalk" | "offtopic" | "fallback";
 type IntentRule = {
   id: string;
@@ -1064,6 +1375,7 @@ function lossSafetyNet(state: ChatState, raw: string): Turn {
   state.handoff.active = true;
   state.handoff.phoneTries = 0;
   state.handoff.declined = [];
+  applyHandoffKind(state, "claim"); // LB-11: a loss / DOA claim isn't a fish-or-food purchase
   state.handoff.awaitingConsent = true;
   state.pendingOffer = null;
   prefillFromMessage(state, raw, norm(raw));
@@ -1152,10 +1464,10 @@ function guaranteeAnswer(state: ChatState, t: string): Turn {
   }
   addFlag(state, "OUTSIDE 8 STATES");
   state.pendingOffer = "handoff";
-  if (place.zone === "other") return { reply: outOfArea(place), intent: "guarantee_other_state" };
+  if (place.zone === "other") return { reply: outOfArea(state, place), intent: "guarantee_other_state" };
   addFlag(state, "REMOTE");
-  if (place.zone === "remote") return { reply: outOfArea(place), intent: "guarantee_remote" };
-  return { reply: outOfArea(place), intent: "guarantee_abroad" };
+  if (place.zone === "remote") return { reply: outOfArea(state, place), intent: "guarantee_remote" };
+  return { reply: outOfArea(state, place), intent: "guarantee_abroad" };
 }
 
 const sizeAskRe = /(\d+(?:\.\d+)?)\s*(?:"|inch|inches)|\b(small|big|large|adult|juvenile)\s+(ones?|fish|discus|size)\b/;
@@ -1177,7 +1489,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "doa_report", tier: "safety", faq: "FAQ 10 (report)",
     test: (m) => isDoaReport(m.t),
-    run: ({ state, raw }) => { addFlag(state, "DOA CLAIM"); return startHandoff(state, raw, ANSWERS.doa); },
+    run: ({ state, raw }) => { addFlag(state, "DOA CLAIM"); return startHandoff(state, raw, ANSWERS.doa, "claim"); },
   },
   {
     id: "mortality", tier: "safety", faq: "FAQ 21",
@@ -1234,7 +1546,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "doa_refund", tier: "safety", faq: "FAQ 10 (report)",
     test: (m) => RE.doaReport.test(m.t),
-    run: ({ state, raw }) => { addFlag(state, "DOA CLAIM"); return startHandoff(state, raw, ANSWERS.doa); },
+    run: ({ state, raw }) => { addFlag(state, "DOA CLAIM"); return startHandoff(state, raw, ANSWERS.doa, "claim"); },
   },
   {
     id: "sick_fish", tier: "safety", faq: "FAQ 18",
@@ -1264,8 +1576,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
     // LB-6 A4: "is this a bot? I want a real person" -> who we are + the site steer.
     run: ({ state }) => {
       state.pendingOffer = null;
-      state.humanPushes = (state.humanPushes ?? 0) + 1;
-      return { reply: `${ANSWERS.areYouHuman} ${state.humanPushes > 1 ? ANSWERS.humanPushShort : ANSWERS.humanPush}`, intent: "are_you_human" };
+      return { reply: `${ANSWERS.areYouHuman} ${pushReply(state)}`, intent: "are_you_human" };
     },
   },
   {
@@ -1273,11 +1584,14 @@ export const INTENT_RULES: readonly IntentRule[] = [
     // site (order via the Shopping Bag; Shiva is notified on Place request).
     // No handoff, no name/number collection; repeats get a shorter steer.
     id: "talk_to_shiva", tier: "safety", faq: "LB-6: steer to site",
-    test: (m) => RE.talkToShiva.test(m.t) || HUMAN_PUSH.test(m.t),
+    // LB-14: plus connect / reach / contact / "put me through" / "get me the owner" (typos too).
+    // "can I call to visit the store" (no person named) stays on the visit answer.
+    // LB-18: "when will Shiva contact me?" (after ordering) is B6, not a push.
+    test: (m) => (RE.talkToShiva.test(m.t) || HUMAN_PUSH.test(m.t) || isReachAsk(m.t)) && !(RE.visit.test(m.t) && !PERSON_WORD.test(m.t)) && !ORDER_RECEIVED.test(m.t),
     run: ({ state }) => {
       state.pendingOffer = null;
-      state.humanPushes = (state.humanPushes ?? 0) + 1;
-      return { reply: state.humanPushes > 1 ? ANSWERS.humanPushShort : ANSWERS.humanPush, intent: "human_push" };
+      // LB-15: 3rd push onward gets the polite "place your requirement" reply, rotated.
+      return { reply: pushReply(state), intent: "human_push" };
     },
   },
 
@@ -1298,7 +1612,25 @@ export const INTENT_RULES: readonly IntentRule[] = [
     run: ({ state }) => { state.pendingOffer = "narrow"; return { reply: "Sure. Which size or colour would you like?", intent: "narrow_ask" }; },
   },
 
+  {
+    // LB-13: answer to "Discus fish or Discus frozen foods?" asked after a pleasantry.
+    id: "looking_for_answer", tier: "offer", faq: "LB-13: fish or food",
+    test: (m) => m.lookingForPending === true && lookingForAnswer(m.t) !== null,
+    run: ({ state, t }) => {
+      const v = lookingForAnswer(t)!;
+      state.lookingForHint = v;
+      state.pendingOffer = null;
+      return { reply: lookingForPointer(v) ?? ANSWERS.lookingForBoth, intent: "looking_for" };
+    },
+  },
+
   // ---- 3. FAQs ----
+  {
+    // LB-13: greetings, thanks, bye and "I'm new" on their own (first-timer order questions keep the SOP).
+    id: "pleasantry", tier: "faq", faq: "LB-13: pleasantry",
+    test: (m) => pleasantryOnly(m.t) !== null && !FIRST_TIMER.test(m.t),
+    run: ({ state, t }) => pleasantryReply(state, pleasantryOnly(t)!),
+  },
   {
     // LB-6 B3 (Lea, 3 Oct): orders never happen in the chat.
     id: "order_in_chat", tier: "faq", faq: "LB-6: order via site",
@@ -1310,6 +1642,16 @@ export const INTENT_RULES: readonly IntentRule[] = [
     id: "order_received", tier: "faq", faq: "LB-6: request placed",
     test: (m) => ORDER_RECEIVED.test(m.t),
     run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.orderReceived, intent: "order_received" }; },
+  },
+  {
+    // LB-18: "when will the fish reach me?" -> depends on place + train route, then the SOP + Chennai pickup.
+    id: "delivery_timing", tier: "faq", faq: "LB-18: delivery timing",
+    // LB-18 typos: matched on timingNorm(t) ("wen", "delivry", "hw lng", "tym"...).
+    test: (m) => {
+      const n = timingNorm(m.t);
+      return (DELIVERY_TIMING.test(n) || TIMING_ORDER.test(n) || TIMING_BARE.test(n) || (TIMING_TO_PLACE.test(n) && !TIMING_TO_ACTION.test(n))) && !NOT_TIMING.test(n);
+    },
+    run: ({ state, t }) => deliveryTimingAnswer(state, t),
   },
   {
     // LB-6 C5: "full amount first?" -> half advance at the holding tank, balance on shipping day.
@@ -1380,9 +1722,10 @@ export const INTENT_RULES: readonly IntentRule[] = [
   { id: "goat_heart", tier: "faq", faq: "FAQ 16", test: (m) => RE.goatHeart.test(m.t), run: ({ state, ctx }) => foodAnswer(state, ctx, true) },
   { id: "food", tier: "faq", faq: "FAQ 15", test: (m) => RE.food.test(m.t), run: ({ state, ctx }) => foodAnswer(state, ctx, false) },
   {
-    id: "pair_or_single", tier: "faq", faq: "FAQ 4",
+    // LB-11: "should I buy a pair?" -> prices are per piece, choose the quantity on the card (+ steps).
+    id: "how_many_to_buy", tier: "faq", faq: "FAQ 4",
     test: (m) => RE.pairSingle.test(m.t),
-    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.pairOrSingle, intent: "pair_or_single" }; },
+    run: ({ state }) => { state.pendingOffer = null; return { reply: join(ANSWERS.howManyToBuy, SITE_STEPS), intent: "how_many_to_buy" }; },
   },
   {
     id: "per_piece", tier: "faq", faq: "FAQ 2 (per piece)",
@@ -1422,7 +1765,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   },
   {
     id: "ship_how", tier: "faq", faq: "FAQ 9",
-    test: (m) => RE.shipHow.test(m.t) && !findPlace(m.t),
+    test: (m) => RE.shipHow.test(timingNorm(m.t)) && !findPlace(m.t), // LB-18: "wen will it ship" too
     run: ({ state }) => { state.pendingOffer = null; return { reply: join(`${ANSWERS.shippingHow}\n${ANSWERS.sop}`, ANSWERS.shipInStates), intent: "ship_how" }; },
   },
   { id: "ship", tier: "faq", faq: "FAQ 5 / 25", test: (m) => RE.ship.test(m.t), run: ({ state, t }) => shippingAnswer(state, t) },
@@ -1478,8 +1821,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
     test: (m) => extractIndianMobile(m.raw) !== null,
     run: ({ state }) => {
       state.pendingOffer = null;
-      state.humanPushes = (state.humanPushes ?? 0) + 1;
-      return { reply: state.humanPushes > 1 ? ANSWERS.humanPushShort : ANSWERS.humanPush, intent: "contact_typed_steer" };
+      return { reply: pushReply(state), intent: "contact_typed_steer" };
     },
   },
   {
@@ -1548,16 +1890,34 @@ export function safetyIntent(raw: string): string | null {
   return rule ? rule.id : null;
 }
 
+/**
+ * LB-11: per-path fish-or-food slot.
+ * - claim: sick fish, mortality, refund-for-sure -> no fish-or-food question (DOA / loss net set it directly).
+ * - fish: strain not listed, hold beyond 7 days, safe-arrival guarantee -> already about fish, not asked.
+ * - everything else (visit, store pickup, reseller, outside the 8 states, claimed offer) -> asked.
+ */
+function handoffKindOf(intent: string): ChatState["handoffKind"] {
+  if (/^(sick_fish|mortality|doa_policy|loss_safety_net)$/.test(intent)) return "claim";
+  if (/^(strain_not_listed|holding_beyond|guarantee_)/.test(intent) || intent === "quarantine_ship") return "fish";
+  return undefined;
+}
+
 /** Normal (non-handoff) routing: first matching rule in INTENT_RULES wins. */
 async function routeIntent(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
-  const m: Msg = { state, raw, t, ctx, offTopic: isOffTopic(t) };
+  const m: Msg = { state, raw, t, ctx, offTopic: isOffTopic(t), lookingForPending: state.pendingOffer === "lookingFor" };
+  if (m.lookingForPending) state.pendingOffer = null;
   for (const rule of INTENT_RULES) {
     if (rule.tier === "faq" && m.offTopic) continue;
     if (!rule.test(m)) continue;
     const turn = await rule.run(m);
-    if (turn) return turn;
+    if (turn) {
+      // LB-11: remember what a handoff offer was about (read by startHandoff on "yes").
+      state.handoffKind = state.pendingOffer === "handoff" ? handoffKindOf(turn.intent) : undefined;
+      return turn;
+    }
   }
   state.pendingOffer = null;
+  state.handoffKind = undefined;
   return { reply: ANSWERS.unclear, intent: "unclear" };
 }
 
@@ -1593,12 +1953,22 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
   }
   const answered = !interrupt && looksLikeAnswer(step, raw, t);
 
+  // LB-11: a number typed at a later step ("9845012345" while asked fish-or-food) is
+  // still the number: keep it and carry on, instead of treating it as a side question.
+  if (!interrupt && !answered && step !== "name" && step !== "phone" && !state.lead.phone) {
+    const phone = extractIndianMobile(raw);
+    if (phone) {
+      state.lead.phone = phone;
+      return advance(state);
+    }
+  }
+
   // A question instead of an answer: answer it, then re-ask the same field.
   // Prompt attacks and other safety rules always take this path.
   if (interrupt || (!answered && !RE.declineField.test(t))) {
     const probe = newProbe(state);
     const r = await routeIntent(probe, raw, t, ctx);
-    const generic = ["unsure", "unclear", "off_topic", "ack", "welcome", "thanks"].includes(r.intent);
+    const generic = ["unsure", "unclear", "off_topic", "ack", "welcome", "welcome_new", "thanks", "looking_for"].includes(r.intent);
     const isCity = step === "city"; // free-text city names fall through to accept below
     if (!generic && !(isCity && r.intent === "off_topic")) {
       // Keep flags/tags/interests learnt from the probe, but stay in the handoff.
@@ -1615,7 +1985,7 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
       return { reply: join(r.reply, askFor(step, state)), intent: "prompt_attack+handoff" };
     }
     // An unrecognised question at a free-text step: don't store it as the answer; ask again.
-    if (raw.includes("?") && (step === "pairSingle" || step === "delivery" || step === "timeline")) {
+    if (raw.includes("?") && (step === "lookingFor" || step === "delivery" || step === "timeline")) {
       return { reply: join(ANSWERS.unclear, askFor(step, state)), intent: "unclear+handoff" };
     }
   }
@@ -1654,12 +2024,16 @@ async function handoffTurn(state: ChatState, raw: string, t: string, ctx: Ctx): 
       else applyCity(state, raw, t);
       break;
     }
-    case "pairSingle": {
-      const v = parsePairSingle(t);
-      if (v) state.lead.pairSingle = v;
-      else if (RE.declineField.test(t)) state.handoff.declined.push("pairSingle");
-      else state.lead.pairSingle = raw.trim().slice(0, 60);
-      break;
+    case "lookingFor": {
+      const v = parseLookingFor(t);
+      if (v) state.lead.lookingFor = v;
+      else if (RE.declineField.test(t)) state.handoff.declined.push("lookingFor");
+      else if ((state.handoff.lookingTries ?? 0) < 1) {
+        state.handoff.lookingTries = (state.handoff.lookingTries ?? 0) + 1;
+        return { reply: ANSWERS.handoffAskLookingFor, intent: "handoff_lookingFor_retry" };
+      } else state.lead.lookingFor = raw.trim().slice(0, 60);
+      // Fish -> Current Stock; frozen foods -> /frozen + /pellets; same Shopping Bag steps.
+      return advance(state, lookingForPointer(state.lead.lookingFor));
     }
     case "delivery": {
       const v = parseDelivery(t);
@@ -1694,6 +2068,9 @@ function newProbe(state: ChatState): ChatState {
  */
 export async function respond(prev: ChatState | null | undefined, message: string, ctx: Ctx): Promise<EngineResult> {
   const state: ChatState = prev && prev.v === 1 ? structuredClone(prev) : newChatState();
+  // LB-11: sessions saved mid-handoff before the change may still sit on the old pair/single step.
+  if ((state.handoff.step as string | undefined) === "pairSingle") state.handoff.step = "lookingFor";
+  state.handoff.declined = state.handoff.declined.map((s) => ((s as string) === "pairSingle" ? "lookingFor" : s));
   const raw = String(message ?? "").trim();
   const t = norm(raw);
   state.turns += 1;

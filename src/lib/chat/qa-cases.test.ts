@@ -228,19 +228,19 @@ describe("re-test MUST-PASS", () => {
   });
 
   it("safe-arrival question mid-handoff is answered, then the same step is asked again", async () => {
-    const r = await convo([...OPEN, "Ravi", "98450 12345", "Hyderabad", "Will the fish surely arrive alive in Delhi?"]);
+    const r = await convo([...OPEN, "Ravi", "fish", "98450 12345", "Hyderabad", "Will the fish surely arrive alive in Delhi?"]);
     const last = r.at(-1)!;
     // LB-6 (Shiva, 3 Oct): care-first out-of-area reply; the side answer drops its offer mid-handoff.
     assert.ok(last.reply.startsWith(outOfAreaReply("Delhi").replace(/\s*Shall I[^.?]*\?$/, "")), last.reply);
-    assert.ok(last.reply.endsWith(ANSWERS.handoffAskPairSingle), last.reply);
+    assert.ok(last.reply.endsWith(ANSWERS.handoffAskDelivery), last.reply);
     assert.ok(last.state.flags.includes("GUARANTEE ASKED"));
-    assert.equal(last.state.lead.pairSingle, undefined, "question not stored as the pair/single answer");
-    const next = await ask("pair", last.state);
-    assert.equal(next.state.lead.pairSingle, "pair");
+    assert.equal(last.state.lead.delivery, undefined, "question not stored as the delivery answer");
+    const next = await ask("train", last.state);
+    assert.equal(next.state.lead.delivery, "train shipping");
   });
 
   it("mortality question at the timeline step is answered, not stored as 'weeks'", async () => {
-    const r = await convo([...OPEN, "Ravi", "98450 12345", "Chennai", "pair", "pickup", "Did any fish die last week?"]);
+    const r = await convo([...OPEN, "Ravi", "fish", "98450 12345", "Chennai", "pickup", "Did any fish die last week?"]);
     const last = r.at(-1)!;
     assert.ok(last.reply.startsWith(ANSWERS.lossSafetyNet.replace(" Shall I pass your details to him?", "")), last.reply);
     assert.ok(last.reply.endsWith(ANSWERS.handoffAskTimeline), last.reply);
@@ -249,14 +249,14 @@ describe("re-test MUST-PASS", () => {
   });
 
   it("unrecognised question at a free-text step is not stored as the answer", async () => {
-    const r = await convo([...OPEN, "Ravi", "98450 12345", "Chennai", "hmm what?"]);
+    const r = await convo([...OPEN, "Ravi", "hmm what?"]);
     const last = r.at(-1)!;
-    assert.ok(last.reply.endsWith(ANSWERS.handoffAskPairSingle), last.reply);
-    assert.equal(last.state.lead.pairSingle, undefined);
+    assert.ok(last.reply.endsWith(ANSWERS.handoffAskLookingFor), last.reply);
+    assert.equal(last.state.lead.lookingFor, undefined);
   });
 
   it("a gpay number at the phone step is still taken as the phone number", async () => {
-    const r = await convo([...OPEN, "Ravi", "my gpay number is 98450 12345"]);
+    const r = await convo([...OPEN, "Ravi", "fish", "my gpay number is 98450 12345"]);
     assert.equal(r.at(-1)!.state.lead.phone, "+919845012345");
   });
 });

@@ -6,7 +6,7 @@
  * than to exact text that includes live prices. Not used at runtime.
  */
 
-import { ANSWERS, OUT_OF_AREA_LEAD, ownerReply, PER_PIECE_LINE } from "./answers.ts";
+import { ANSWERS, isFirmPushReply, OUT_OF_AREA_LEAD, ownerReply, PER_PIECE_LINE } from "./answers.ts";
 
 const FIXED: Array<[string, string]> = [
   [ANSWERS.lossSafetyNet, "FAQ 26"],
@@ -18,6 +18,8 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.unsure, "last-resort"],
   [ANSWERS.doa, "FAQ 10"],
   [ANSWERS.shipInStates, "FAQ 5"],
+  [ANSWERS.deliveryTiming, "LB-18 timing"],
+  [ANSWERS.deliveryTimingChennai, "LB-18 timing"],
   [ANSWERS.discount, "FAQ 19"],
   [ANSWERS.paymentDetails, "Rule 5a"],
   [ANSWERS.howToPay, "FAQ 7"],
@@ -34,13 +36,18 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.sickFish, "FAQ 18"],
   [ANSWERS.strainNotListedAsk, "FAQ 20"],
   [ANSWERS.strainNotListed, "FAQ 20"],
-  [ANSWERS.pairOrSingle, "FAQ 4"],
+  [ANSWERS.howManyToBuy, "FAQ 4"],
+  [ANSWERS.lookingForFish, "handoff:lookingFor-fish"],
+  [ANSWERS.lookingForFood, "handoff:lookingFor-food"],
+  [ANSWERS.lookingForBoth, "handoff:lookingFor-both"],
   [ANSWERS.beginnerNotListed, "FAQ 3"],
   [ANSWERS.beginnerIntro, "FAQ 3"],
   [ANSWERS.faqStrains, "FAQ 1"],
   [ANSWERS.noInternalFigures, "internal"],
   [ANSWERS.humanPush, "LB-6 steer"],
   [ANSWERS.humanPushShort, "LB-6 steer"],
+  [ANSWERS.welcomeGreeting, "welcome"],
+  [ANSWERS.welcomeNewHobbyist, "welcome-new"],
   [ANSWERS.unlistedFirm, "LB-5 firm"],
   [ANSWERS.orderInChat, "LB-6 order via site"],
   [ANSWERS.orderReceived, "LB-6 request placed"],
@@ -53,11 +60,12 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.careTips, "care-tips"],
   [ANSWERS.liveFetchFailed, "live-fetch-failed"],
   [ANSWERS.thanks, "thanks"],
+  [ANSWERS.youreWelcome, "thanks"],
   [ANSWERS.bye, "bye"],
   [ANSWERS.handoffAskName, "handoff:name"],
   [ANSWERS.handoffPhoneRetry, "handoff:phone"],
   [ANSWERS.handoffAskCity, "handoff:city"],
-  [ANSWERS.handoffAskPairSingle, "handoff:pairSingle"],
+  [ANSWERS.handoffAskLookingFor, "handoff:lookingFor"],
   [ANSWERS.handoffAskDelivery, "handoff:delivery"],
   [ANSWERS.handoffAskTimeline, "handoff:timeline"],
   [ANSWERS.handoffNeedName, "handoff:name"],
@@ -87,6 +95,8 @@ export function faqIdOf(reply: string): string {
     const core = stripOffer(text);
     if (core.length >= 20 && core !== text && first.startsWith(core)) return id;
   }
+  if (isFirmPushReply(first)) return "LB-15 firm";
+  if (/^Delivery time to [^.]+ depends on the train route from Chennai\./.test(first)) return "LB-18 timing";
   if (first.startsWith(OUT_OF_AREA_LEAD)) return "out-of-area";
   if (first.startsWith(ANSWERS.availableIntro)) return "FAQ 1";
   if (first.startsWith(ANSWERS.stockIntro)) return "C1 stock";

@@ -86,7 +86,15 @@ export const ANSWERS = {
       : "Thanks. What's the best WhatsApp or phone number for Shiva to reach you?",
   handoffPhoneRetry: "A working WhatsApp number, please.",
   handoffAskCity: "Which city are you in?",
-  handoffAskPairSingle: "Are you looking at a pair or single fish?",
+  /** LB-11 (Shiva, 3 Oct): replaces the old pair-or-single question; asked right after the name. */
+  handoffAskLookingFor: "Are you looking for Discus fish or Discus frozen foods?",
+  /** LB-11 pointers after that answer. Pages checked live 3 Oct 12:25 IST: /available, /frozen, /pellets. */
+  lookingForFish:
+    "Great. Everything ready now is on Current Stock (thediscusden.com/available): choose a quantity on a card, then open the Shopping Bag, tap Finalize and Place request.",
+  lookingForFood:
+    "Great. Our frozen foods are on thediscusden.com/frozen and pellets on thediscusden.com/pellets: choose a pack, then open the same Shopping Bag, tap Finalize and Place request.",
+  lookingForBoth:
+    "Great. Fish are on Current Stock (thediscusden.com/available), frozen foods on thediscusden.com/frozen and pellets on thediscusden.com/pellets. Everything goes in the same Shopping Bag: tap Finalize, then Place request.",
   handoffAskDelivery: "Would you prefer train shipping or Chennai pickup?",
   handoffAskTimeline: "Is your tank ready now, or a few weeks away?",
   handoffClose: (name?: string) =>
@@ -113,8 +121,9 @@ export const ANSWERS = {
   beginnerOutro: "Once you place a request from the Shopping Bag, Shiva is notified and can help match fish to your tank too.",
   beginnerNotListed:
     "Our live list is at thediscusden.com/available. Once you place a request from the Shopping Bag, Shiva is notified and can suggest a starter strain from what's ready now.",
-  pairOrSingle:
-    "That depends on your tank and plans. Shiva will advise you personally once you place a request from the Shopping Bag on thediscusden.com.",
+  /** LB-11: "should I buy a pair?" -> per piece, choose the quantity (site steps follow). */
+  howManyToBuy:
+    "That depends on your tank and plans. All prices are per piece, and you choose the quantity on each card. Shiva can advise on your tank once your request is placed.",
   shipInStates:
     "We deliver by train across Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana, Maharashtra, Madhya Pradesh and Odisha. Chennai pickup is also possible.",
   /**
@@ -131,6 +140,13 @@ export const ANSWERS = {
   /** LB-6: repeated pushes get the same steer, shorter. */
   humanPushShort:
     "All the details are on thediscusden.com. To order, choose your fish on thediscusden.com/available, then open the Shopping Bag, tap Finalize and Place request. Shiva is notified as soon as your request is placed and will take it from there.",
+  /**
+   * LB-15 (Shiva, 3 Oct 12:49 PM): 3rd push to reach Shiva onward. [0] is Shiva's
+   * wording with the form named; the rest rotate from the 4th push so no two
+   * replies in a row are the same. Never a handoff.
+   */
+  humanPushFirm:
+    "Understood. Kindly place your requirement on thediscusden.com and fill in the form (Shopping Bag, then Finalize and Place request). All your questions and concerns will be handled by the owner, Shiva, once he is notified. We appreciate your cooperation.",
   /**
    * LB-6 SOP (Shiva, 3 Oct) for first-timers and orders outside Chennai (not
    * store pickup). Default flow; the 7-days-free / ₹100-a-day line is only for
@@ -161,6 +177,16 @@ export const ANSWERS = {
   // [PENDING ST-6] minimal draft, no dates or day counts until Shiva locks it.
   /** FAQ 9, aligned to the LB-6 SOP: the SOP itself is the answer (see engine). */
   shippingHow: "Here's how delivery works for orders outside Chennai:",
+  /**
+   * LB-18 (Shiva, 3 Oct): "when will the fish reach me?" -> timing depends on the
+   * place and the train route (no hour or day counts: the site gives none), then
+   * the LB-6 SOP (sopIntro + sop, reused), then Chennai pickup as the alternative.
+   */
+  deliveryTiming: "Delivery time depends on your location and the train route to your city.",
+  deliveryTimingPickup: "If you're in Chennai or can come over, store pickup is also possible by arrangement.",
+  /** LB-18: a Chennai customer leads with store pickup. */
+  deliveryTimingChennai:
+    "In Chennai, the simplest option is store pickup by arrangement: once your request is placed, Shiva shares the location and sets a time with you. Delivery to other cities goes by train, and the timing depends on the route.",
   doa:
     "If a fish arrives dead, we refund it promptly. Please record a clear unboxing video and send it to Shiva within 24 hours of arrival. Shiva reviews every claim personally.",
   visit:
@@ -179,10 +205,10 @@ export const ANSWERS = {
   quarantineShipYes: "Yes.",
   holdingBeyond: "Anything beyond that is Shiva's call. Shall I pass your details?",
   foodIntro: "We have",
-  foodOutro: "See thediscusden.com/in-the-den.",
+  foodOutro: "See thediscusden.com/frozen and thediscusden.com/pellets.",
   foodFetchFailed:
-    "We have frozen foods and pellets. I can't load the live rates right now. You can see them at thediscusden.com/in-the-den.",
-  goatHeartPending: "Goat Heart Mix rates are coming soon. Keep an eye on thediscusden.com/in-the-den.",
+    "We have frozen foods and pellets. I can't load the live rates right now. You can see them at thediscusden.com/frozen and thediscusden.com/pellets.",
+  goatHeartPending: "Goat Heart Mix rates are coming soon. Keep an eye on thediscusden.com/frozen.",
   reseller: "Thanks. Shiva handles trade enquiries personally. Shall I pass your details to him?",
   sickFish:
     "Sorry to hear that. I can't give health or treatment advice here, but Shiva can talk it through with you personally. Shall I pass your details to him now?",
@@ -240,6 +266,12 @@ export const ANSWERS = {
     "Everything is on thediscusden.com and it's self-explanatory. Once you place a request from the Shopping Bag, Shiva is notified and takes it from there.",
   /** FAQ 25: delivery abroad. Hand off; flags OUTSIDE 8 STATES + REMOTE. Never promise international shipping. */
   thanks: "You're welcome. Anything else I can help with?",
+  /** LB-13: pleasantries get a warm line, then the fish-or-food question (engine). */
+  welcomeGreeting:
+    "Hello, and welcome to The Discus Den. Our discus are raised, quarantined and held here until they're ready.",
+  welcomeNewHobbyist:
+    "Welcome to The Discus Den, and welcome to the discus hobby. Every fish here is raised, quarantined and held until it's ready, which helps a new keeper start well.",
+  youreWelcome: "You're welcome.",
   bye: "Thank you for visiting The Discus Den. Take care.",
 
   // Transport-level replies (http.ts)
@@ -251,6 +283,73 @@ export const ANSWERS = {
   serverError:
     "Sorry, I'm having trouble right now. Please try again in a moment, or see thediscusden.com/available.",
 } as const;
+
+
+/**
+ * LB-15 (Kiara 8a88e4e, Shiva "never repeat"): firm replies are composed from an
+ * opening, a form sentence (Shopping Bag, Finalize, Place request) and a closing
+ * naming Shiva as the owner. Index k (0 = 3rd push) maps one-to-one onto the
+ * 6 x 6 x 6 = 216 combinations, with the opening changing on every push; past
+ * 216, extra sentences are appended in bijective base 6, so no index ever
+ * repeats a reply. k = 0 is Shiva's own wording.
+ */
+export const FIRM_OPENINGS: readonly string[] = [
+  "Understood.",
+  "I understand, and I appreciate your patience.",
+  "I hear you.",
+  "Thank you for bearing with me.",
+  "Of course, I understand.",
+  "Noted, and thank you for your patience.",
+];
+export const FIRM_FORM: readonly string[] = [
+  "Kindly place your requirement on thediscusden.com and fill in the form (Shopping Bag, then Finalize and Place request).",
+  "Please add your requirement to the Shopping Bag on thediscusden.com, tap Finalize, fill in the form and tap Place request.",
+  "Kindly fill in the form on thediscusden.com with your requirement and any questions: Shopping Bag, Finalize, then Place request.",
+  "The quickest route is the form on thediscusden.com: add your requirement to the Shopping Bag, tap Finalize and then Place request.",
+  "Simply choose what you need on thediscusden.com, open the Shopping Bag, tap Finalize, fill in your details and tap Place request.",
+  "Please place your requirement through the form on thediscusden.com (Shopping Bag, Finalize, Place request) and mention any questions there.",
+];
+export const FIRM_CLOSINGS: readonly string[] = [
+  "All your questions and concerns will be handled by the owner, Shiva, once he is notified. We appreciate your cooperation.",
+  "Shiva, the owner, is notified straight away and will personally handle all your questions.",
+  "Once it reaches him, the owner, Shiva, will take it from there and answer everything himself. Thank you for understanding.",
+  "That is how the owner, Shiva, gets notified, and he will answer all your concerns personally. We appreciate your cooperation.",
+  "The owner, Shiva, looks after every request himself and will get back to you on the details you share. Thank you.",
+  "Shiva, our owner, reviews each request personally and will handle your questions from there. Thank you for your understanding.",
+];
+const FIRM_EXTRAS: readonly string[] = [
+  "Everything you need is on the site.",
+  "There's no payment on the site.",
+  "It only takes a minute.",
+  "Shipping is extra, and you get an estimate after the request.",
+  "Prices are per piece, as shown on each card.",
+  "We're glad you're here.",
+];
+export function firmPushReply(k: number): string {
+  const n = FIRM_OPENINGS.length;
+  const a = k % n;
+  const b = Math.floor(k / n) % n;
+  const c = Math.floor(k / (n * n)) % n;
+  const parts = [FIRM_OPENINGS[a]!, FIRM_FORM[(a + b) % n]!, FIRM_CLOSINGS[(a + b + c) % n]!];
+  // Past 216: bijective base-6 digits of q pick extra sentences (q >= 1 -> a unique, non-empty list).
+  let q = Math.floor(k / (n * n * n));
+  while (q > 0) {
+    q -= 1;
+    parts.push(FIRM_EXTRAS[q % FIRM_EXTRAS.length]!);
+    q = Math.floor(q / FIRM_EXTRAS.length);
+  }
+  return parts.join(" ");
+}
+export const HUMAN_PUSH_FIRM: readonly string[] = [0, 1, 2, 3].map(firmPushReply);
+/** Test / QA support: is this one of the composed LB-15 firm replies? */
+export function isFirmPushReply(text: string): boolean {
+  return FIRM_OPENINGS.some((o) => text.startsWith(`${o} `)) && FIRM_FORM.some((f) => text.includes(f)) && FIRM_CLOSINGS.some((c) => text.includes(c));
+}
+
+/** LB-18: delivery timing for a named place inside the 8 train states (never a day count). */
+export function deliveryTimingFor(place: string): string {
+  return `Delivery time to ${place} depends on the train route from Chennai.`;
+}
 
 /** B12 (3 Oct rule): the owner's name as the site footer shows it. Never a number. */
 export const OWNER_FALLBACK = "Shiva";

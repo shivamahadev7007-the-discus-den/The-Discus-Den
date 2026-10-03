@@ -74,3 +74,50 @@ export function findPlace(text: string): Place | null {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// LB-18 (Kiara 387ccb5): misspelt city names in timing asks ("banglore", "hydrabad",
+// "chenai", "kochin", "mumbaai", "kolkatta"). Only words right after a place
+// preposition (to / in / for / at / from / till / until / near) are tried, the
+// first letter must match, and the word must be 1 letter off (2 for 7+ letters).
+// ---------------------------------------------------------------------------
+const FUZZY_STOP = new Set([
+  "thank", "thanks", "there", "these", "those", "where", "which", "would", "could", "should", "about", "place", "small", "train",
+  "order", "reach", "deliver", "delivery", "stock", "store", "station", "home", "house", "town", "village", "city", "state", "your", "their",
+  "other", "another", "india", "anywhere", "somewhere", "buying", "orders", "parcel", "shipping", "receive", "collect", "pickup",
+]);
+function lev(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length]!;
+}
+const SINGLE_WORD = COMPILED.filter((c) => !c.alias.includes(" ") && c.alias.length >= 5);
+
+/** A known place behind a misspelt name ("how many days to banglore"); null if none or ambiguous. */
+export function findPlaceFuzzy(text: string): Place | null {
+  const t = text.toLowerCase();
+  const words = [...t.matchAll(/\b(?:to|in|for|at|from|till|until|near|reach|reaches|arrive\s+(?:at|in))\s+([a-z]{5,})\b/g)].map((m) => m[1]!);
+  for (const w of words) {
+    if (FUZZY_STOP.has(w)) continue;
+    let best: (typeof SINGLE_WORD)[number] | null = null;
+    let bestD = 99;
+    let tie = false;
+    for (const c of SINGLE_WORD) {
+      if (c.alias[0] !== w[0]) continue;
+      const limit = c.alias.length >= 7 ? 2 : 1;
+      const d = lev(w, c.alias);
+      if (d === 0 || d > limit) continue;
+      if (d < bestD) {
+        best = c;
+        bestD = d;
+        tie = false;
+      } else if (d === bestD && best && best.state !== c.state) tie = true;
+    }
+    if (best && !tie) return { name: best.alias, state: best.state, zone: best.zone };
+  }
+  return null;
+}

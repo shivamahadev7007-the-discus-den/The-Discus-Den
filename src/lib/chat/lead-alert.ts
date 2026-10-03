@@ -1,6 +1,6 @@
 /**
- * Lead alert for Shiva: fired once per session when a handoff completes
- * (name + valid number captured).
+ * Lead alert for Shiva: fired once per session as soon as the lead is
+ * actionable (name + valid number captured, or the handoff completes).
  *
  * Channel is chosen by CHAT_LEAD_ALERT_MODE:
  *   unset / "off"  -> log a one-line note only (default; lead is still in the DB)
@@ -39,7 +39,7 @@ function interestLine(s: ChatState): string {
   if (s.tags.history) bits.push(s.tags.history === "first-timer" ? "First-timer" : "Returning");
   if (s.lead.city) bits.push(s.lead.city);
   if (s.interests.length) bits.push(`asked about ${s.interests.slice(0, 3).join(", ")}`);
-  if (s.lead.pairSingle) bits.push(`wants ${s.lead.pairSingle}`);
+  if (s.lead.lookingFor) bits.push(`looking for ${s.lead.lookingFor}`);
   if (s.lead.timeline) bits.push(s.lead.timeline);
   return bits.join(", ") || "General enquiry";
 }
@@ -55,7 +55,8 @@ export function formatLeadAlert(lead: LeadForAlert, now: Date = new Date()): str
     `Name:        ${l.name ?? "not given"}`,
     `WhatsApp:    ${l.phone ?? "not given"}`,
     `City:        ${l.city ?? "not given"}  (State: ${l.stateName ?? "unknown"} | In 8 states: ${in8})`,
-    `Pair/Single: ${l.pairSingle ?? "not sure"}`,
+    // LB-11: fish-or-food replaces the old pair/single line; left out where the path doesn't ask it (DOA, sick fish).
+    ...(s.handoff.skip?.includes("lookingFor") && !l.lookingFor ? [] : [`Looking for: ${l.lookingFor ?? "not sure"}`]),
     `Delivery:    ${l.inShipStates === false ? "not asked (OUTSIDE 8 STATES)" : l.delivery ?? "not sure"}`,
     `Timeline:    ${l.timeline ?? "not sure"}`,
     `Tags:        ${tags}`,
@@ -111,14 +112,14 @@ function oneLine(s: string): string {
   return s.replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 
-/** Short summary for the subject: tags/flags first, then strains, place, pair/single. */
+/** Short summary for the subject: tags/flags first, then strains, place, fish-or-food. */
 export function leadSummary(s: ChatState): string {
   const bits: string[] = [];
   for (const f of s.flags) bits.push(f);
   if (s.interests.length) bits.push(s.interests.slice(0, 2).join(", "));
   const place = s.lead.city ?? s.lead.stateName;
   if (place) bits.push(place);
-  if (s.lead.pairSingle) bits.push(s.lead.pairSingle);
+  if (s.lead.lookingFor) bits.push(s.lead.lookingFor);
   if (!bits.length) bits.push(s.tags.history === "first-timer" ? "First-timer enquiry" : "General enquiry");
   const out = oneLine(bits.join(" · "));
   return out.length > 110 ? `${out.slice(0, 107).trimEnd()}...` : out;
@@ -255,6 +256,14 @@ export async function sendLeadAlert(
       console.warn(`[chat] lead alert failed: Resend HTTP ${res.status} ${detail}`);
       return { sent: false, channel: "email", error: `http ${res.status}` };
     }
+    // LB-7: positive evidence in the runtime log (no lead details, no key).
+    let id: string | undefined;
+    try {
+      id = (await res.text()).match(/"id"\s*:\s*"([^"]{1,80})"/)?.[1];
+    } catch {
+      id = undefined;
+    }
+    console.log(`[chat] lead alert sent: email via Resend${id ? ` id=${id}` : ""}`);
     return { sent: true, channel: "email" };
   } catch (err) {
     const msg = ctrl.signal.aborted ? "timeout" : err instanceof Error ? err.message : String(err);

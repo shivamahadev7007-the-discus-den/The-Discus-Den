@@ -12,6 +12,8 @@ import type { ChatState } from "./engine.ts";
 import type { TranscriptLine } from "./lead-alert.ts";
 
 export type AlertStatus = "sent" | "suppressed_duplicate" | "suppressed_ip_cap" | "suppressed_global_cap";
+/** What happened after a "sent" decision when the alert did not go out (LB-7). */
+export type AlertOutcome = "failed" | "not_sent_off";
 export type AlertDecisionInput = {
   sessionId: string;
   phone: string | null;
@@ -48,7 +50,10 @@ export interface ChatStore {
   saveSession(sessionId: string, source: string, ipHash: string | null, state: ChatState): Promise<void>;
   appendMessages(rows: MessageRow[]): Promise<void>;
   upsertLead(sessionId: string, source: string, state: ChatState): Promise<void>;
-  /** True exactly once per completed lead (atomic). */
+  /**
+   * True exactly once per lead (atomic), as soon as it is actionable: the
+   * handoff completed, or name + valid number are both captured (LB-7).
+   */
   claimLeadAlert(sessionId: string): Promise<boolean>;
   /**
    * Flood control for lead alerts, counted in the DB: one alert per phone per
@@ -56,6 +61,11 @@ export interface ChatStore {
    * Records the decision (sent or suppressed_*) and returns it.
    */
   decideLeadAlert(input: AlertDecisionInput): Promise<AlertStatus>;
+  /**
+   * LB-7: a "sent" decision whose alert did not actually go out is rewritten to
+   * `outcome`, so it stops counting toward the phone / IP / global caps.
+   */
+  recordAlertOutcome(sessionId: string, outcome: AlertOutcome): Promise<void>;
   transcript(sessionId: string): Promise<TranscriptLine[]>;
 }
 
@@ -150,7 +160,7 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
           l.city ?? null,
           l.stateName ?? null,
           l.inShipStates ?? null,
-          l.pairSingle ?? null,
+          l.lookingFor ?? null, // LB-11: pair_single column repurposed for fish-or-food (old rows keep pair/single; no migration)
           l.delivery ?? null,
           l.timeline ?? null,
           JSON.stringify(tags),
@@ -165,7 +175,8 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
       const sql = await getSql();
       const rows = await sql.query(
         `update chat_leads set alert_sent_at = now()
-         where session_id = $1 and completed and alert_sent_at is null
+         where session_id = $1 and alert_sent_at is null
+           and (completed or (name is not null and phone is not null))
          returning session_id`,
         [sessionId],
       );
@@ -200,6 +211,12 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
       return status;
     },
 
+    async recordAlertOutcome(sessionId, outcome) {
+      const sql = await getSql();
+      await sql.query("update chat_alerts set status = $2 where session_id = $1 and status = 'sent'", [sessionId, outcome]);
+      await sql.query("update chat_leads set alert_status = $2, updated_at = now() where session_id = $1", [sessionId, outcome]);
+    },
+
     async transcript(sessionId) {
       const sql = await getSql();
       const rows = await sql.query<{ role: "user" | "bot"; text: string; created_at: string | Date }>(
@@ -216,8 +233,8 @@ export function createMemoryChatStore() {
   const rate = new Map<string, number>();
   const sessions = new Map<string, { source: string; ipHash: string | null; state: ChatState }>();
   const messages: Array<MessageRow & { at: number }> = [];
-  const leads = new Map<string, { source: string; state: ChatState; completed: boolean; alertSent: boolean; alertStatus?: AlertStatus }>();
-  const alerts: Array<{ sessionId: string; phone: string | null; ipHash: string | null; status: AlertStatus; at: number }> = [];
+  const leads = new Map<string, { source: string; state: ChatState; completed: boolean; alertSent: boolean; alertStatus?: AlertStatus | AlertOutcome }>();
+  const alerts: Array<{ sessionId: string; phone: string | null; ipHash: string | null; status: AlertStatus | AlertOutcome; at: number }> = [];
   const store: ChatStore & {
     sessions: typeof sessions;
     messages: typeof messages;
@@ -244,6 +261,11 @@ export function createMemoryChatStore() {
       const lead = leads.get(input.sessionId);
       if (lead) lead.alertStatus = status;
       return status;
+    },
+    async recordAlertOutcome(id, outcome) {
+      for (const a of alerts) if (a.sessionId === id && a.status === "sent") a.status = outcome;
+      const lead = leads.get(id);
+      if (lead) lead.alertStatus = outcome;
     },
     async hitRateLimit(bucket, windowSeconds, nowMs) {
       const key = `${bucket}@${windowStart(nowMs, windowSeconds).getTime()}`;
@@ -274,7 +296,8 @@ export function createMemoryChatStore() {
     },
     async claimLeadAlert(id) {
       const l = leads.get(id);
-      if (!l || !l.completed || l.alertSent) return false;
+      if (!l || l.alertSent) return false;
+      if (!l.completed && !(l.state.lead.name && l.state.lead.phone)) return false;
       l.alertSent = true;
       return true;
     },
