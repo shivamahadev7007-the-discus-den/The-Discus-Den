@@ -14,13 +14,15 @@
 import {
   ANSWERS,
   OWNER_FALLBACK,
+  outOfAreaReply,
   ownerReply,
   PER_PIECE_LINE,
+  SITE_STEPS,
   VOLUME_DISCOUNT_LINE,
   type LeadFlag,
 } from "./answers.ts";
 import type { CatalogLoader, FoodItem, StrainCard } from "./catalog.ts";
-import { findPlace } from "./places.ts";
+import { findPlace, type Place } from "./places.ts";
 
 // ---------------------------------------------------------------------------
 // State
@@ -66,6 +68,8 @@ export type ChatState = {
   /** Live strain names the visitor asked about (for the alert's Interest line). */
   interests: string[];
   completed: boolean;
+  /** LB-6: how many times the visitor pushed to reach a human (steered to the site). */
+  humanPushes?: number;
 };
 
 export function newChatState(): ChatState {
@@ -172,7 +176,7 @@ const RE = {
   owner:
     /\b(who\s+(is|'s|s)\s+(the\s+)?(owner|proprietor|founder|boss|person\s+behind|man\s+behind|guy\s+behind)|who\s+owns|who\s+runs|who\s+(started|founded|is\s+running|is\s+behind)\s+(the\s+den|this|the\s+(shop|store|business))|owner('?s)?\s+name|name\s+of\s+the\s+owner|are\s+you\s+the\s+owner|whose\s+(shop|store|business)|owner\s+(yaar|yaaru|evar)|(yaar|yaaru)\s+owner)\b/,
   human:
-    /\b(are\s+you\s+(a\s+)?(human|person|real|bot|robot|ai|machine)|is\s+this\s+(a\s+)?(bot|human|real\s+person|ai)|am\s+i\s+(talking|chatting)\s+(to|with)|you\s+a\s+bot)\b/,
+    /\b(are\s+(you|u)\s+(a\s+|an\s+)?(human|person|real|bot|robot|ai|machine|chatbot|automated)|is\s+this\s+(a\s+|an\s+)?(bot|human|real\s+person|ai|chatbot|robot|automated|person|live\s+chat)|am\s+i\s+(talking|chatting|speaking)\s+(to|with)|(you|u)\s+(a\s+)?(bot|robot)|(is\s+)?(this|it)\s+(a\s+)?(real\s+)?(person|human)\s+(replying|typing|answering|chatting)|is\s+(anyone|someone)\s+(real|actually)\s+(there|here|typing)|(bot|robot)\s+(hai|aa|ah|ya|or\s+(human|person|real))|(real|actual)\s+person\s+(or|replying|there))\b/,
   talkToShiva:
     /\b(talk\s+to\s+shiva|speak\s+(to|with)\s+shiva|chat\s+with\s+shiva|talk\s+to\s+(a\s+)?(human|person|someone|owner)|real\s+person|contact\s+shiva|call\s+shiva|reach\s+shiva|message\s+shiva|shiva'?s?\s+(number|phone|whatsapp|contact|mobile|email)|your\s+(number|phone|whatsapp|contact|mobile|email)|phone\s+number|whatsapp\s+number|mobile\s+number|contact\s+(number|details|info)|call\s+me|call\s+back|shiva\s+kitta|pesanum|pesa\s+venum|connect\s+me|number\s+(kudunga|kudu|venum|send)|call\s+(pannanum|pannunga|panna|pannuga)|phone\s+line|business\s+(number|phone|line)|contact\s+number|your\s+contact)\b/,
   reseller:
@@ -199,7 +203,7 @@ const RE = {
   quarantine:
     /\bquarantin\w*|\b(are|is)\s+(the\s+|your\s+|these\s+)?(fish|discus)\s+(healthy|in\s+good\s+health|disease[\s-]?free|strong)\b|\bhealthy\s+(fish|discus|stock)\b|\bhealth\s+(of\s+)?(the\s+|your\s+)?(fish|discus)\b/,
   ordering:
-    /\b(how\s+(do|can|to)\s+i\s+(order|buy|purchase)|how\s+to\s+(order|buy|purchase)|ordering|place\s+(an\s+)?order|order\s+process|cart)\b/,
+    /\b(how\s+(do|can|to|should)\s+(i|we)\s+(order|buy|purchase|book)|how\s+to\s+(order|buy|purchase|book)|ordering|place\s+(an\s+)?order|order\s+process|process\s+to\s+(order|buy)|cart|shopping\s+bag|finali[sz]e|order\s+(eppadi|epdi|panradhu\s+eppadi|pannuradhu|pannanum)|eppadi\s+(order|vaang\w*)|vaang\w*\s+eppadi)\b/,
   care:
     /\b(care|tips|how\s+to\s+(keep|maintain|look\s+after|raise)|maintenance|water\s+change|water\s+changes|temperature|temp|ph|feeding|how\s+often|tank\s+size|tank\s+mates|setup|set\s+up)\b/,
   price:
@@ -613,10 +617,13 @@ function strainWordsIn(t: string): string[] {
   return hits;
 }
 
+/** LB-6 D2: a filter with no match points back to the page (no generic handoff offer). */
+const NOTHING_MATCHES = "Nothing on our available page matches that right now. Full list: thediscusden.com/available.";
+
 async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx: Ctx, kind: "price" | "available" | "strain"): Promise<Turn | null> {
   const cards = await liveStrains(ctx);
   if (!cards) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.liveFetchFailed, intent: `${kind}_fallback` };
   }
 
@@ -632,7 +639,7 @@ async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx
     const lines = match.cards.slice(0, 5).map(cardLine).join("\n");
     const extra = [ANSWERS.shippingExtra, VOLUME_DISCOUNT_LINE];
     if (match.bundled) {
-      state.pendingOffer = "handoff";
+      state.pendingOffer = null; // LB-6 D2
       return { reply: join(lines, extra.join(" "), ANSWERS.bundledVariant), intent: `${kind}_strain` };
     }
     state.pendingOffer = null;
@@ -650,9 +657,9 @@ async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx
 
   const filtered = filterCards(raw, cards);
   if (filtered && !filtered.length) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return {
-      reply: "Nothing on our available page matches that right now. Full list: thediscusden.com/available. Want me to ask Shiva about it?",
+      reply: NOTHING_MATCHES,
       intent: "available_filtered_none",
     };
   }
@@ -663,9 +670,9 @@ async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx
     const cap = budget ? Number(budget[3]!.replace(/,/g, "")) : Infinity;
     pool = [...pool].filter((c) => c.price <= cap).sort((a, b) => a.price - b.price);
     if (!pool.length) {
-      state.pendingOffer = "handoff";
+      state.pendingOffer = null; // LB-6 D2
       return {
-        reply: "Nothing on our available page matches that right now. Full list: thediscusden.com/available. Want me to ask Shiva about it?",
+        reply: NOTHING_MATCHES,
         intent: "available_filtered_none",
       };
     }
@@ -699,10 +706,17 @@ function stockLine(c: StrainCard): string {
   return `• ${parts}, ${c.priceText} per piece: in stock right now.`;
 }
 
+/** Buying several ("can I get 20 pieces?", "need 6 fish", "a few of them"). */
+/** "can I get 20 pieces?" / "do you have 10?": a quantity ask, answered with availability only. */
+const QTY_ASK =
+  /\b(can|could|may)\s+(i|we)\s+(get|buy|order|have|take|book)\s+([2-9]|[1-9]\d+)\b(?!\s*(months?|weeks?|years?|days?|inch\w*|cm|"|'|\.\d))|\b(do\s+you\s+have|have\s+you\s+got|is\s+there|are\s+there)\s+([2-9]|[1-9]\d+)\b(?!\s*(months?|weeks?|years?|days?|inch\w*|cm|"|'|\.\d))|\b([2-9]|[1-9]\d+)\s*(pieces?|pcs|nos)\s*(available|possible|in\s+stock)?\s*\?/;
+const SEVERAL =
+  /\b([2-9]|[1-9]\d+)\s*(pieces?|pcs|nos|fish|discus|pairs?|of\s+(them|those|these))\b|\b(buy|get|order|take|need|want|book|have)\s+([2-9]|[1-9]\d+)\b|\b(several|multiple|bulk|a\s+few\s+of)\b/;
+
 async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
   const cards = await allStrains(ctx);
   if (!cards || !cards.length) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.stockFetchFailed, intent: "stock_fallback" };
   }
   const match = matchStrains(raw, cards);
@@ -712,8 +726,10 @@ async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): 
     .filter((w) => !w.split(" ").every((x) => chosenWords.has(singular(x))));
   if (match.cards.length && !unmatchedVocab.length) {
     for (const c of match.cards) if (!state.interests.includes(c.name)) state.interests.push(c.name);
-    state.pendingOffer = "handoff";
-    return { reply: join(match.cards.slice(0, 5).map(stockLine).join("\n"), ANSWERS.stockOutro), intent: "stock_strain" };
+    // LB-6 (Shiva, 3 Oct): status only, then the site steps (+ volume line when buying several). No handoff.
+    state.pendingOffer = null;
+    const outro = SEVERAL.test(t) ? `${ANSWERS.stockOutro} ${VOLUME_DISCOUNT_LINE}` : ANSWERS.stockOutro;
+    return { reply: join(match.cards.slice(0, 5).map(stockLine).join("\n"), outro, SITE_STEPS), intent: "stock_strain" };
   }
   // A strain the site doesn't list: no count, ever.
   const vocab = match.cards.length ? unmatchedVocab : strainWordsIn(t).filter((w) => !COLOURS.includes(w));
@@ -724,12 +740,14 @@ async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): 
   }
   const listed = cards.filter((c) => c.available && c.stock !== undefined && c.stock > 0);
   if (!listed.length) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.stockFetchFailed, intent: "stock_fallback" };
   }
-  state.pendingOffer = "narrow";
+  // LB-6 (Shiva, 3 Oct): status only, then the site steps (+ volume line when buying several).
+  state.pendingOffer = null;
+  const listOutro = SEVERAL.test(t) ? `${ANSWERS.stockListOutro} ${VOLUME_DISCOUNT_LINE}` : ANSWERS.stockListOutro;
   return {
-    reply: join(`${ANSWERS.stockIntro}\n${listed.slice(0, 5).map(stockLine).join("\n")}`, ANSWERS.stockListOutro),
+    reply: join(`${ANSWERS.stockIntro}\n${listed.slice(0, 5).map(stockLine).join("\n")}`, listOutro, SITE_STEPS),
     intent: "stock_list",
   };
 }
@@ -741,7 +759,7 @@ async function ownerAnswer(state: ChatState, ctx: Ctx): Promise<Turn> {
   } catch {
     owner = null;
   }
-  state.pendingOffer = "handoff";
+  state.pendingOffer = null; // LB-6: no handoff offer
   return { reply: ownerReply(owner ?? OWNER_FALLBACK), intent: "owner" };
 }
 
@@ -758,11 +776,11 @@ async function foodAnswer(state: ChatState, ctx: Ctx, goat: boolean): Promise<Tu
       state.pendingOffer = null;
       return { reply: `${foodLine(ghm)}. ${ANSWERS.foodOutro}`, intent: "food_goat_live" };
     }
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.goatHeartPending, intent: "food_goat_pending" };
   }
   if (!foods.frozen && !foods.pellets) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.foodFetchFailed, intent: "food_fallback" };
   }
   const frozen = (foods.frozen ?? []).filter((f) => f.packs.length);
@@ -772,7 +790,7 @@ async function foodAnswer(state: ChatState, ctx: Ctx, goat: boolean): Promise<Tu
   if (frozen.length) parts.push(`frozen foods (${frozen.map(foodLine).join("; ")})`);
   if (pellets.length) parts.push(pellets.map(foodLine).join("; "));
   if (!parts.length) {
-    state.pendingOffer = "handoff";
+    state.pendingOffer = null; // LB-6 D2
     return { reply: ANSWERS.foodFetchFailed, intent: "food_fallback" };
   }
   state.pendingOffer = null;
@@ -784,7 +802,7 @@ async function beginnerAnswer(state: ChatState, ctx: Ctx): Promise<Turn> {
   state.tags.history ??= "first-timer";
   const cards = await liveStrains(ctx);
   const yd = cards?.find((c) => /^yellow diamonds?$/i.test(c.name.trim()));
-  state.pendingOffer = "handoff";
+  state.pendingOffer = null; // LB-6 D2: no generic connect offer
   if (!yd) return { reply: ANSWERS.beginnerNotListed, intent: "beginner_handoff" };
   if (!state.interests.includes(yd.name)) state.interests.push(yd.name);
   return {
@@ -855,28 +873,79 @@ async function unlistedFirm(state: ChatState, raw: string, t: string, ctx: Ctx):
   return { reply: ANSWERS.unlistedFirm, intent: "unlisted_firm" };
 }
 
+// ---------------------------------------------------------------------------
+// LB-6: steer to the site; SOP for first-timers / outside Chennai
+// ---------------------------------------------------------------------------
+
+const SOP_BLOCK = `${ANSWERS.sopIntro}\n${ANSWERS.sop}`;
+const CHENNAI = /\b(chennai|madras)\b/;
+/** Pushes to reach a person, beyond the classic talkToShiva phrasings (English + Tanglish). */
+const HUMAN_PUSH = new RegExp(
+  [
+    String.raw`\b(talk|speak|chat)\s+(to|with)\s+(a\s+|the\s+|some\s+)?(human|person|someone|somebody|owner|manager|agent|staff|real\s+(human|person)|actual\s+person|boss)\b`,
+    String.raw`\b(need|want|wanna|have)\s+to\s+(talk|speak)\b|\blet\s+me\s+(talk|speak)\b|\bcan\s+i\s+(talk|speak|call)\b`,
+    String.raw`\b(human|person)\s+(please|pls|plz|only|agent)\b|\breal\s+(human|people)\b|\blive\s+(agent|person|chat)\b|\bcustomer\s+(care|service|support)\b`,
+    String.raw`\b(give|send|share|tell)\s+(me\s+)?(your|his|the\s+owner'?s?|owner'?s?|shiva'?s?)\s+(number|phone|contact|mobile|whatsapp|email)\b|\bowner'?s?\s+(number|contact|phone|mobile|whatsapp|email)\b`,
+    String.raw`\b(anyone|anybody|someone)\s+(there|available|real|from\s+the\s+den)\b|\bnot\s+a\s+bot\b|\b(no|stop)\s+(the\s+)?bot\b|\bdon'?t\s+want\s+(a\s+|the\s+|to\s+talk\s+to\s+a\s+)?bot\b|\bi\s+want\s+(a\s+)?(human|person|shiva|the\s+owner)\b`,
+    String.raw`\bcall\s+me\b|\bcall\s+(back|now|asap)\b|\bconnect\s+(me|us)\b|\burgent\w*\b[^.?!]*\b(connect|call|talk|speak|shiva|owner|human)\b|\bplease\s+connect\b`,
+    // LB-6 A11: basic Hinglish pushes (reply stays English; Hindi replies are BL-1).
+    String.raw`\b(owner|shiva|malik|maalik|insaan|insan|aadmi|admi|banda|bande|kisi|kisi\s+(insaan|insan|aadmi|admi|bande))\s+(se|say|ko)\s+(baat|bat|baath)\b|\b(baat|bat)\s+(karao|karwao|krao|karvao|karwa\s+do|kara\s+do|karni\s+hai|karna\s+hai|krni\s+hai|karni|karna|karunga|karna\s+chahta|karna\s+chahti)\b|\b(number|phone\s+number|contact|mobile\s+number)\s+(do|dedo|de\s+do|dijiye|dena|bhejo|bhej\s+do|chahiye|milega)\b|\b(call|phone)\s+(karo|karna|kar\s+do|karwao|kijiye|karein)\b|\b(insaan|insan|aadmi|admi|human|asli\s+(insaan|aadmi))\s+(chahiye|se\s+baat|bhejo)\b`,
+    String.raw`\b(owner|shiva|ungal\s+owner|anna)\s+kitta\s+(pesa\w*|pesu\w*|connect|call)\b|\b(owner|shiva)\s+(number|contact)\s+(kudunga|kudu|venum|tharunga|anuppunga)\b|\b(pesanum|pesa\s+venum|pesa\s+mudiyuma|pesalama|pesunga)\b|\bcall\s+(pannunga|pannu|panna\s+mudiyuma|pannalama)\b|\b(aal|aalu|manushan)\s+(venum|kitta)\b`,
+  ].join("|"),
+);
+/** LB-6 B3: "can I order on chat itself?" -> No, orders go through the site. */
+const ORDER_IN_CHAT =
+  /\b(order|buy|book|purchase|reserve)\s+(it\s+|them\s+|fish\s+)?(on|in|through|via|over|using|from)\s+(the\s+|this\s+)?(chat|chatbot|bot|whatsapp|here)\b|\b(can|could|may|do)\s+(i|we)\s+(just\s+)?(order|buy|book|purchase)\s+(here|right\s+here|now\s+here|from\s+you\s+here)\b|\b(can|could|will)\s+(you|u)\s+(take|book|place|note)\s+(my|the|an|our)\s+order\b|\b(take|book|place)\s+(my|the|an)\s+order\s+(here|on\s+chat|in\s+chat|via\s+chat)\b|\bchat\s+(itself|la\s+order|mein\s+order)\b|\bchat\s+(la|le|mein|me)\s+(order|book)\w*/;
+/** LB-6 B6: "how will I know you got my order?" -> Place request notifies Shiva, who contacts you. */
+const ORDER_RECEIVED =
+  /\bhow\s+(will|would|do|can|shall)\s+i\s+know\b[^?.]*\b(order|request|got\s+it|received|placed|went\s+through)\b|\b(did|have|has)\s+(you|u|shiva|the\s+den)\s+(get|got|receive|received|seen?)\s+(my|our|the)\s+(order|request)\b|\b(will|do)\s+(i|we)\s+get\s+(a\s+|any\s+)?(confirmation|notification|reply|call\s+back|message)\b|\bwhat\s+happens\s+(after|once|when)\s+(i\s+)?(place|order|placing|tap|submit)\w*|\b(order|request)\s+(confirmation|status|received)\b|\b(is|was)\s+my\s+(order|request)\s+(received|placed|confirmed|through)\b|\bwho\s+(will\s+)?(contact|call|reply\s+to)\s+me\b/;
+/** LB-6 C7: collecting at the railway station is SOP step 4, not Chennai store pickup. */
+const STATION = /\b(railway|station|platform|rail\s+agent|train\s+agent|porter|ported)\b/;
+/** LB-6 C5: full amount / advance questions -> the SOP payment step. */
+const PAY_SPLIT =
+  /\b(full\s+(amount|payment|money)|pay\s+(it\s+)?all|whole\s+amount|entire\s+amount|advance|half|upfront|up\s+front|in\s+full|balance|instal+ments?|pay\s+(first|before|later|after|on\s+delivery)|before\s+(dispatch|shipping)|token\s+amount|part\s+payment)\b/;
+/** LB-6 D1: light small talk. */
+const SMALL_TALK =
+  /\b(just\s+(chatting|browsing|bored|checking\s+(in|you\s+out))|favou?rite\s+(fish|discus|strain|colou?r|one)|how\s+are\s+(you|u)|how'?s\s+it\s+going|what'?s\s+up|wassup|lol|lmao|haha+|bored|time\s?pass|who\s+made\s+you|do\s+you\s+like\s+(fish|discus))\b/;
+const FIRST_TIMER =
+  /\b(first[\s-]?time(r)?\s+(buyer|buying|customer|order|ordering|here|purchase|with\s+you)|my\s+first\s+(order|purchase|time)|first\s+order|i'?m\s+(a\s+)?first[\s-]?timer|i'?m\s+new\s+(here|to\s+(this|the\s+den|ordering|buying|your\s+shop))|never\s+(bought|ordered)\s+(from|here|before)|new\s+customer|how\s+does\s+(it|this|the\s+(process|order\w*))\s+work|what\s+(is|'s)\s+the\s+process)\b/;
+/** "Keep the fish longer" asks: only these get the 7-days-free / ₹100-a-day line. */
+const KEEP_LONGER =
+  /\b(longer|later|more\s+days|extra\s+days|few\s+(more\s+)?(days|weeks)|until|till|for\s+a\s+(week|while|few)|tank\s+(is\s+)?(not|isn'?t)\s+ready|not\s+ready\s+yet|keep\s+them\s+for|hold\s+(them|it|my\s+fish)\s+for)\b/;
+
 const QUARANTINE_HOLD =
   /\b(quarantin\w*|hold|holds|holding|held|keep\s+(my|the)\s+fish|keep\s+them|keeps?\s+(the\s+)?fish|settle\w*|condition\w*\s+(the\s+)?fish)\b/;
 const SHIP_WORD =
   /\b(ship|ships|shipped|shipping|send|sends|sent|deliver|delivers|delivered|delivery|courier\w*|dispatch\w*|parcel|post\s+it|anuppu\w*)\b/;
 
-function shippingAnswer(state: ChatState, t: string): Turn {
+/** Generic "abroad" words name no place; show "Your location" instead. */
+const GENERIC_PLACE = /^(abroad|overseas|outside india|out of india|international|internationally|foreign|outside the country|other countries|another country)$/;
+const UPPER_PLACE: Record<string, string> = { uae: "UAE", usa: "USA", uk: "UK" };
+/** LB-6 (Shiva, 3 Oct): outside the 8 train states -> care-first, tentative handoff offer. Never a refusal. */
+function outOfArea(place: Place): string {
+  const name = GENERIC_PLACE.test(place.name) ? undefined : UPPER_PLACE[place.name] ?? titleCase(place.name);
+  return outOfAreaReply(name, place.zone === "abroad");
+}
+
+function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean } = {}): Turn {
+  const withSop = (opts.sop ?? true) && !CHENNAI.test(t);
   const place = findPlace(t);
   if (place) {
     state.lead.stateName ??= place.state;
     if (place.zone === "in") {
       state.pendingOffer = null;
-      return { reply: ANSWERS.shipInStates, intent: "ship_in_states" };
+      // LB-6: in-state, non-Chennai -> the SOP for how it works.
+      return { reply: withSop ? join(ANSWERS.shipInStates, SOP_BLOCK) : ANSWERS.shipInStates, intent: "ship_in_states" };
     }
     addFlag(state, "OUTSIDE 8 STATES");
     state.pendingOffer = "handoff";
-    if (place.zone === "other") return { reply: ANSWERS.shipOtherState, intent: "ship_other_state" };
+    if (place.zone === "other") return { reply: outOfArea(place), intent: "ship_other_state" };
     addFlag(state, "REMOTE");
-    if (place.zone === "remote") return { reply: ANSWERS.shipRemote, intent: "ship_remote" };
-    return { reply: ANSWERS.shipAbroad, intent: "ship_abroad" };
+    if (place.zone === "remote") return { reply: outOfArea(place), intent: "ship_remote" };
+    return { reply: outOfArea(place), intent: "ship_abroad" };
   }
   state.pendingOffer = null;
-  return { reply: ANSWERS.shipInStates, intent: "ship_general" };
+  return { reply: withSop ? join(ANSWERS.shipInStates, SOP_BLOCK) : ANSWERS.shipInStates, intent: "ship_general" };
 }
 
 // ---------------------------------------------------------------------------
@@ -1083,10 +1152,10 @@ function guaranteeAnswer(state: ChatState, t: string): Turn {
   }
   addFlag(state, "OUTSIDE 8 STATES");
   state.pendingOffer = "handoff";
-  if (place.zone === "other") return { reply: ANSWERS.shipOtherState, intent: "guarantee_other_state" };
+  if (place.zone === "other") return { reply: outOfArea(place), intent: "guarantee_other_state" };
   addFlag(state, "REMOTE");
-  if (place.zone === "remote") return { reply: ANSWERS.shipRemote, intent: "guarantee_remote" };
-  return { reply: ANSWERS.shipAbroad, intent: "guarantee_abroad" };
+  if (place.zone === "remote") return { reply: outOfArea(place), intent: "guarantee_remote" };
+  return { reply: outOfArea(place), intent: "guarantee_abroad" };
 }
 
 const sizeAskRe = /(\d+(?:\.\d+)?)\s*(?:"|inch|inches)|\b(small|big|large|adult|juvenile)\s+(ones?|fish|discus|size)\b/;
@@ -1143,7 +1212,8 @@ export const INTENT_RULES: readonly IntentRule[] = [
   },
   {
     id: "payment_details", tier: "safety", faq: "Rule 5a",
-    test: (m) => isPaymentDetails(m.t, m.raw),
+    // LB-6 B6: "did you get my order?" is about the request, not a payment.
+    test: (m) => isPaymentDetails(m.t, m.raw) && !(ORDER_RECEIVED.test(m.t) && !RE.payment.test(m.t)),
     run: ({ state }) => { addFlag(state, "PAYMENT ASKED"); state.pendingOffer = null; return { reply: ANSWERS.paymentDetails, intent: "payment_details" }; },
   },
   {
@@ -1155,9 +1225,10 @@ export const INTENT_RULES: readonly IntentRule[] = [
     id: "discount", tier: "safety", faq: "FAQ 19",
     test: (m) => isDiscountCode(m.t, m.raw),
     run: ({ state }) => {
+      // LB-6 (Shiva, 3 Oct): no handoff; volume discounts are automatic in the Shopping Bag. Never a code.
       addFlag(state, "DISCOUNT ASKED");
-      state.pendingOffer = "handoff";
-      return { reply: `${ANSWERS.discount}\n\n${VOLUME_DISCOUNT_LINE}`, intent: "discount" };
+      state.pendingOffer = null;
+      return { reply: join(ANSWERS.discount, SITE_STEPS), intent: "discount" };
     },
   },
   {
@@ -1178,7 +1249,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     // LB-2 (Shiva, 3 Oct): availability only (in / out of stock), never a quantity.
     id: "stock_count", tier: "safety", faq: "C1: availability only",
-    test: (m) => RE.stock.test(m.t),
+    test: (m) => RE.stock.test(m.t) || QTY_ASK.test(m.t),
     run: ({ state, raw, t, ctx }) => stockAnswer(state, raw, t, ctx),
   },
   {
@@ -1190,12 +1261,24 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "are_you_human", tier: "safety", faq: "Rules: are you a person",
     test: (m) => RE.human.test(m.t),
-    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.areYouHuman, intent: "are_you_human" }; },
+    // LB-6 A4: "is this a bot? I want a real person" -> who we are + the site steer.
+    run: ({ state }) => {
+      state.pendingOffer = null;
+      state.humanPushes = (state.humanPushes ?? 0) + 1;
+      return { reply: `${ANSWERS.areYouHuman} ${state.humanPushes > 1 ? ANSWERS.humanPushShort : ANSWERS.humanPush}`, intent: "are_you_human" };
+    },
   },
   {
-    id: "talk_to_shiva", tier: "safety", faq: "Handoff",
-    test: (m) => RE.talkToShiva.test(m.t),
-    run: ({ state, raw }) => startHandoff(state, raw),
+    // LB-6 (Shiva, 3 Oct): pushes to reach a human / Shiva are steered to the
+    // site (order via the Shopping Bag; Shiva is notified on Place request).
+    // No handoff, no name/number collection; repeats get a shorter steer.
+    id: "talk_to_shiva", tier: "safety", faq: "LB-6: steer to site",
+    test: (m) => RE.talkToShiva.test(m.t) || HUMAN_PUSH.test(m.t),
+    run: ({ state }) => {
+      state.pendingOffer = null;
+      state.humanPushes = (state.humanPushes ?? 0) + 1;
+      return { reply: state.humanPushes > 1 ? ANSWERS.humanPushShort : ANSWERS.humanPush, intent: "human_push" };
+    },
   },
 
   // ---- 2. replies to the previous offer ----
@@ -1216,6 +1299,24 @@ export const INTENT_RULES: readonly IntentRule[] = [
   },
 
   // ---- 3. FAQs ----
+  {
+    // LB-6 B3 (Lea, 3 Oct): orders never happen in the chat.
+    id: "order_in_chat", tier: "faq", faq: "LB-6: order via site",
+    test: (m) => ORDER_IN_CHAT.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.orderInChat, intent: "order_in_chat" }; },
+  },
+  {
+    // LB-6 B6: confirmation = "Request placed" on the site; Shiva is notified and contacts the customer.
+    id: "order_received", tier: "faq", faq: "LB-6: request placed",
+    test: (m) => ORDER_RECEIVED.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.orderReceived, intent: "order_received" }; },
+  },
+  {
+    // LB-6 C5: "full amount first?" -> half advance at the holding tank, balance on shipping day.
+    id: "pay_advance", tier: "faq", faq: "LB-6: SOP step 5",
+    test: (m) => PAY_SPLIT.test(m.t) && !RE.shipCost.test(m.t) && !RE.holding.test(m.t) && (RE.payment.test(m.t) || /\b(amount|money|full|whole)\b/.test(m.t)),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.payAdvance, intent: "pay_advance" }; },
+  },
   {
     // Equipment we don't sell (filters, heaters, tanks...): FAQ 23 redirect.
     id: "equipment", tier: "faq", faq: "FAQ 23",
@@ -1243,17 +1344,23 @@ export const INTENT_RULES: readonly IntentRule[] = [
     id: "quarantine_ship", tier: "faq", faq: "LB-3: FAQ 13 + 14 + 5",
     test: (m) => QUARANTINE_HOLD.test(m.t) && SHIP_WORD.test(m.t),
     run: ({ state, t }) => {
-      const delivery = shippingAnswer(state, t);
-      let hold: string = ANSWERS.holding;
-      if (RE.holdingBeyond.test(t)) {
-        addFlag(state, "LONG HOLD");
-        hold = `${ANSWERS.holding} ${ANSWERS.holdingBeyond}`;
-        state.pendingOffer = "handoff";
+      // LB-6: the SOP is the normal flow; the 7-days-free line only when the
+      // customer asks us to keep the fish longer.
+      const delivery = shippingAnswer(state, t, { sop: false });
+      const parts: string[] = [`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine}`];
+      if (KEEP_LONGER.test(t) || RE.holdingBeyond.test(t)) {
+        let hold: string = ANSWERS.holding;
+        if (RE.holdingBeyond.test(t)) {
+          addFlag(state, "LONG HOLD");
+          hold = `${ANSWERS.holding} ${ANSWERS.holdingBeyond}`;
+          state.pendingOffer = "handoff";
+        }
+        parts[0] += ` ${hold}`;
       }
-      return {
-        reply: join(`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine} ${hold}`, delivery.reply),
-        intent: "quarantine_ship",
-      };
+      const outside = delivery.intent !== "ship_in_states" && delivery.intent !== "ship_general";
+      if (!outside && !CHENNAI.test(t)) parts.push(SOP_BLOCK);
+      parts.push(delivery.reply);
+      return { reply: join(...parts), intent: "quarantine_ship" };
     },
   },
   {
@@ -1275,12 +1382,22 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "pair_or_single", tier: "faq", faq: "FAQ 4",
     test: (m) => RE.pairSingle.test(m.t),
-    run: ({ state }) => { state.pendingOffer = "handoff"; return { reply: ANSWERS.pairOrSingle, intent: "pair_or_single" }; },
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.pairOrSingle, intent: "pair_or_single" }; },
   },
   {
     id: "per_piece", tier: "faq", faq: "FAQ 2 (per piece)",
     test: (m) => RE.perPiece.test(m.t) && !matchAny(m.raw),
     run: ({ state }) => { state.pendingOffer = null; return { reply: `${PER_PIECE_LINE} ${VOLUME_DISCOUNT_LINE}`, intent: "per_piece" }; },
+  },
+  {
+    // LB-6: first-time customers get the order steer + SOP.
+    id: "first_timer", tier: "faq", faq: "LB-6: SOP",
+    test: (m) => FIRST_TIMER.test(m.t),
+    run: ({ state }) => {
+      state.pendingOffer = null;
+      state.tags.history ??= "first-timer";
+      return { reply: join(ANSWERS.ordering, SOP_BLOCK), intent: "first_timer" };
+    },
   },
   {
     id: "beginner", tier: "faq", faq: "FAQ 3",
@@ -1293,6 +1410,12 @@ export const INTENT_RULES: readonly IntentRule[] = [
     run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.shippingCost, intent: "ship_cost" }; },
   },
   {
+    // LB-6 C7: "can I pick up from the station?" -> SOP step 4 (railway agent) + the SOP.
+    id: "station_pickup", tier: "faq", faq: "LB-6: SOP step 4",
+    test: (m) => STATION.test(m.t) && !/\b(fire|police|bus)\s+station\b/.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; state.lead.delivery ??= "train shipping"; return { reply: join(ANSWERS.stationPickup, SOP_BLOCK), intent: "station_pickup" }; },
+  },
+  {
     id: "pickup", tier: "faq", faq: "FAQ 12",
     test: (m) => RE.pickup.test(m.t),
     run: ({ state }) => { state.lead.delivery ??= "Chennai pickup"; state.pendingOffer = "handoff"; return { reply: ANSWERS.pickup, intent: "pickup" }; },
@@ -1300,7 +1423,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "ship_how", tier: "faq", faq: "FAQ 9",
     test: (m) => RE.shipHow.test(m.t) && !findPlace(m.t),
-    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.shippingHow, intent: "ship_how" }; },
+    run: ({ state }) => { state.pendingOffer = null; return { reply: join(`${ANSWERS.shippingHow}\n${ANSWERS.sop}`, ANSWERS.shipInStates), intent: "ship_how" }; },
   },
   { id: "ship", tier: "faq", faq: "FAQ 5 / 25", test: (m) => RE.ship.test(m.t), run: ({ state, t }) => shippingAnswer(state, t) },
   {
@@ -1316,7 +1439,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "ordering", tier: "faq", faq: "FAQ 6",
     test: (m) => RE.ordering.test(m.t),
-    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.ordering, intent: "ordering" }; },
+    run: ({ state }) => { state.pendingOffer = null; return { reply: join(ANSWERS.ordering, SOP_BLOCK), intent: "ordering" }; },
   },
   {
     id: "how_to_pay", tier: "faq", faq: "FAQ 7",
@@ -1338,7 +1461,7 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "care_tips", tier: "faq", faq: "Quick tap: care tips",
     test: (m) => RE.care.test(m.t),
-    run: ({ state }) => { state.pendingOffer = "handoff"; return { reply: ANSWERS.careTips, intent: "care_tips" }; },
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.careTips, intent: "care_tips" }; }, // LB-6 D2
   },
   {
     // A strain, colour or size named on its own ("yellow diamonds?", "red ones", "any 5 inch?").
@@ -1349,9 +1472,15 @@ export const INTENT_RULES: readonly IntentRule[] = [
   },
   {
     // Contact details typed out of the blue: start the handoff with them prefilled.
-    id: "contact_typed", tier: "faq", faq: "Handoff",
+    // LB-6: a number typed out of the blue is a callback push: steer to the site
+    // (the cart's Place request form collects the WhatsApp number). No handoff.
+    id: "contact_typed", tier: "faq", faq: "LB-6: steer to site",
     test: (m) => extractIndianMobile(m.raw) !== null,
-    run: ({ state, raw }) => startHandoff(state, raw),
+    run: ({ state }) => {
+      state.pendingOffer = null;
+      state.humanPushes = (state.humanPushes ?? 0) + 1;
+      return { reply: state.humanPushes > 1 ? ANSWERS.humanPushShort : ANSWERS.humanPush, intent: "contact_typed_steer" };
+    },
   },
   {
     id: "name_given", tier: "faq", faq: "Handoff",
@@ -1373,6 +1502,12 @@ export const INTENT_RULES: readonly IntentRule[] = [
   // ---- 4. small talk ----
   { id: "welcome", tier: "smalltalk", faq: "Welcome", test: (m) => RE.greeting.test(m.t), run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.welcome, intent: "welcome" }; } },
   { id: "thanks", tier: "smalltalk", faq: "Small talk", test: (m) => RE.thanks.test(m.t), run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.thanks, intent: "thanks" }; } },
+  {
+    // LB-6 D1: chit-chat gets a warm redirect to the stock page.
+    id: "small_talk", tier: "smalltalk", faq: "LB-6: small talk",
+    test: (m) => SMALL_TALK.test(m.t),
+    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.smallTalk, intent: "small_talk" }; },
+  },
   { id: "bye", tier: "smalltalk", faq: "Small talk", test: (m) => RE.bye.test(m.t), run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.bye, intent: "bye" }; } },
   {
     id: "ack", tier: "smalltalk", faq: "Small talk",

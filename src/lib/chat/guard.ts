@@ -38,6 +38,8 @@ const BLOCK_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "refund-approval", re: /\b(approved?|processed|issued)\s+(your\s+|a\s+|the\s+)?refund\b/i },
   { name: "medical", re: /\b(medicine|medication|dosage|dose|mg\/l|antibiotic|metronidazole|praziquantel|formalin|malachite|methylene|salt\s+bath|treat\s+with)\b/i },
   { name: "coupon-code", re: /\b[A-Z]{3,}\d{1,4}\b/ },
+  // LB-6 (Shiva, 3 Oct): never refuse delivery to a place; out-of-area asks get a care-first handoff.
+  { name: "delivery-refusal", re: /\b(we\s+|i\s+)?(don'?t|do\s+not|can'?t|cannot|can\s+not|won'?t|will\s+not|unable\s+to|are\s+unable\s+to|are\s+not\s+able\s+to)\s+(deliver|ship|send|courier|dispatch)\b|\b(no|not\s+offering|not\s+available\s+for)\s+(delivery|shipping)\s+(to|outside|there|abroad)\b|\b(delivery|shipping)\s+(is\s+)?not\s+(possible|available)\b|\bnot\s+possible\s+to\s+(ship|deliver|send)\b|\b(only|just)\s+(deliver|ship|send)\s+(within|inside|to)\b|\bdeliver\s+(only\s+)?within\s+india\b|\bout\s+of\s+(our\s+)?(delivery|service)\s+(area|range|zone)\b/i },
   { name: "shop-words", re: /\b(cheap|cheapest|deals?|sale|hurry|best\s+price|offer\s+ends|grab)\b/i },
   { name: "shop-words", re: /!!!/ },
 ];

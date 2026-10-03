@@ -224,17 +224,24 @@ describe("handoff after the safety net", () => {
   });
 });
 
+/**
+ * LB-6: "Talk to Shiva" no longer starts a handoff (it steers to the site), so
+ * tests that exercise the handoff mechanics open one the genuine way: a store
+ * visit request, then "yes" to "Shall I pass your details?".
+ */
+const OPEN = ["Can I visit the store?", "yes"];
+
 describe("mid-handoff: safety net answers, then re-asks the same step", () => {
   const steps: Array<[string[], string, string]> = [
-    [["Talk to Shiva"], "my fish died lol", ANSWERS.handoffAskName],
-    [["Talk to Shiva", "Ravi"], "wait, do ur fish die a lot?", ANSWERS.handoffAskPhone("Ravi")],
-    [["Talk to Shiva", "Ravi", "98450 12345"], "last batch fish sethuruchu", ANSWERS.handoffAskCity],
-    [["Talk to Shiva", "Ravi", "98450 12345", "Chennai"], "will a pair survive the trip?", ANSWERS.handoffAskPairSingle],
-    [["Talk to Shiva", "Ravi", "98450 12345", "Chennai", "pair"], "refund kidaikuma if dead?", ANSWERS.handoffAskDelivery],
-    [["Talk to Shiva", "Ravi", "98450 12345", "Chennai", "pair", "pickup"], "my last one died in a week", ANSWERS.handoffAskTimeline],
+    [[...OPEN], "my fish died lol", ANSWERS.handoffAskName],
+    [[...OPEN, "Ravi"], "wait, do ur fish die a lot?", ANSWERS.handoffAskPhone("Ravi")],
+    [[...OPEN, "Ravi", "98450 12345"], "last batch fish sethuruchu", ANSWERS.handoffAskCity],
+    [[...OPEN, "Ravi", "98450 12345", "Chennai"], "will a pair survive the trip?", ANSWERS.handoffAskPairSingle],
+    [[...OPEN, "Ravi", "98450 12345", "Chennai", "pair"], "refund kidaikuma if dead?", ANSWERS.handoffAskDelivery],
+    [[...OPEN, "Ravi", "98450 12345", "Chennai", "pair", "pickup"], "my last one died in a week", ANSWERS.handoffAskTimeline],
   ];
   for (const [before, msg, reask] of steps) {
-    it(`${before.length} steps in: ${msg}`, async () => {
+    it(`${before.length - 1} steps in: ${msg}`, async () => {
       const r = await convo([...before, msg]);
       const last = r.at(-1)!;
       assert.ok(last.reply.startsWith(NET.replace(" Shall I pass your details to him?", "")), last.reply);

@@ -24,7 +24,13 @@ const FAKE_KEY = "re_test_FAKEKEY_123";
 const TO = "owner@example.com";
 const EMAIL_ENV = { CHAT_LEAD_ALERT_MODE: "email", RESEND_API_KEY: FAKE_KEY, CHAT_LEAD_ALERT_EMAIL_TO: TO };
 const SID = "3f2b8c1e-9a4d-4e2f-8b6a-00000000e001";
-const HANDOFF = ["Talk to Shiva", "Ravi", "9845012345", "Kochi", "single", "train", "ready now"];
+/**
+ * LB-6: "Talk to Shiva" no longer starts a handoff (it steers to the site), so
+ * tests that exercise the handoff mechanics open one the genuine way: a store
+ * visit request, then "yes" to "Shall I pass your details?".
+ */
+const OPEN = ["Can I visit the store?", "yes"];
+const HANDOFF = [...OPEN, "Ravi", "9845012345", "Kochi", "single", "train", "ready now"];
 
 function offlineCatalog(): CatalogLoader {
   return createCatalogLoader({ fetch: async () => ({ ok: false, status: 500, text: async () => "" }) });
@@ -220,7 +226,7 @@ describe("LB-4 · /api/chat sends the email once per completed handoff", () => {
     const body = JSON.parse(String(calls[0]!.init.body));
     assert.match(body.subject, /^New chat lead: Ravi — /);
     assert.match(body.text, /Phone\/WhatsApp: \+919845012345/);
-    assert.match(body.text, /Visitor: Talk to Shiva/);
+    assert.match(body.text, /Visitor: Can I visit the store\?/);
     assert.match(body.text, /Visitor: ready now/);
     // Customer never gets their stored details echoed back.
     for (const o of out) assert.doesNotMatch(o.reply, /9845012345/);

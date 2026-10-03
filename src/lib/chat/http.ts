@@ -208,6 +208,8 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
           console.warn(`[chat] output guard: blocked=${guarded.blocked.join(",") || "-"} stripped=${guarded.stripped} intent=${result.intent}`);
         }
         const reply = guarded.text;
+        // LB-6 D2: the guard's safe reply is a site steer, not an offer.
+        if (guarded.blocked.length && reply === ANSWERS.unsure) result.state.pendingOffer = null;
 
         // --- Persist (never echoed back) ---
         await Promise.all([

@@ -6,7 +6,7 @@
  * than to exact text that includes live prices. Not used at runtime.
  */
 
-import { ANSWERS, ownerReply, PER_PIECE_LINE } from "./answers.ts";
+import { ANSWERS, OUT_OF_AREA_LEAD, ownerReply, PER_PIECE_LINE } from "./answers.ts";
 
 const FIXED: Array<[string, string]> = [
   [ANSWERS.lossSafetyNet, "FAQ 26"],
@@ -15,12 +15,9 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.claimedOffer, "FAQ 22"],
   [ANSWERS.offTopic, "FAQ 23"],
   [ANSWERS.unclear, "FAQ 24 unclear"],
-  [ANSWERS.shipAbroad, "FAQ 25"],
   [ANSWERS.unsure, "last-resort"],
   [ANSWERS.doa, "FAQ 10"],
   [ANSWERS.shipInStates, "FAQ 5"],
-  [ANSWERS.shipOtherState, "FAQ 5 other"],
-  [ANSWERS.shipRemote, "FAQ 5 remote"],
   [ANSWERS.discount, "FAQ 19"],
   [ANSWERS.paymentDetails, "Rule 5a"],
   [ANSWERS.howToPay, "FAQ 7"],
@@ -42,7 +39,14 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.beginnerIntro, "FAQ 3"],
   [ANSWERS.faqStrains, "FAQ 1"],
   [ANSWERS.noInternalFigures, "internal"],
+  [ANSWERS.humanPush, "LB-6 steer"],
+  [ANSWERS.humanPushShort, "LB-6 steer"],
   [ANSWERS.unlistedFirm, "LB-5 firm"],
+  [ANSWERS.orderInChat, "LB-6 order via site"],
+  [ANSWERS.orderReceived, "LB-6 request placed"],
+  [ANSWERS.stationPickup, "LB-6 station"],
+  [ANSWERS.payAdvance, "LB-6 advance"],
+  [ANSWERS.smallTalk, "small-talk"],
   [ANSWERS.stockFetchFailed, "C1 stock"],
   [ANSWERS.areYouHuman, "are-you-human"],
   [ANSWERS.welcome, "welcome"],
@@ -83,6 +87,7 @@ export function faqIdOf(reply: string): string {
     const core = stripOffer(text);
     if (core.length >= 20 && core !== text && first.startsWith(core)) return id;
   }
+  if (first.startsWith(OUT_OF_AREA_LEAD)) return "out-of-area";
   if (first.startsWith(ANSWERS.availableIntro)) return "FAQ 1";
   if (first.startsWith(ANSWERS.stockIntro)) return "C1 stock";
   if (first.startsWith(`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine}`)) return "LB-3";
