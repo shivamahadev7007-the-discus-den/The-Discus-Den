@@ -1220,7 +1220,15 @@ export function timingNorm(t: string): string {
   return t.replace(/[a-z0-9]+/g, (w) => timingWord(w));
 }
 
-const NOT_TIMING = /\b(back\s+in\s+stock|in\s+stock|restock\w*|come\s+back|available\s+again|new\s+(fish|stock|batch|arrivals?|strains?)|next\s+(batch|lot|stock)|when\s+did|acclimat\w*|(should|do|can)\s+i\s+(switch|turn|feed|keep|add|put|float|open|change)|hold|holding|keep\s+(them|my\s+fish|the\s+fish)|quarantin\w*|fast(ed|ing)?\s+(them|the\s+fish|for)|grow|live|lifespan|refund|claim)\b|\bwhen\s+(will|do|would|does)\s+(you|it|they|the\s+fish)\s+(ship|dispatch|send)\b(?![^?.!]*\b(reach|arrive|get\s+to)\b)/;
+const NOT_TIMING = /\b(days?\s+old|weeks?\s+old|(get|hear)\s+(a\s+|any\s+|back\s+)?(reply|response|answer)|back\s+in\s+stock|in\s+stock|restock\w*|come\s+back|available\s+again|new\s+(fish|stock|batch|arrivals?|strains?)|next\s+(batch|lot|stock)|when\s+did|acclimat\w*|(should|do|can)\s+i\s+(switch|turn|feed|keep|add|put|float|open|change)|hold|holding|keep\s+(them|my\s+fish|the\s+fish)|quarantin\w*|fast(ed|ing)?\s+(them|the\s+fish|for)|grow|live|lifespan|refund|claim)\b|\bwhen\s+(will|do|would|does)\s+(you|it|they|the\s+fish)\s+(ship|dispatch|send)\b(?![^?.!]*\b(reach|arrive|get\s+to)\b)/;
+
+/** LB-18 broad fallback: a typo-tolerant delivery / deliver / days / reach / ship / arrive / "how long" word. */
+const DELIVERY_ISH =
+  /\b(delivery|deliveries|deliver|delivers|delivered|delivering|days?|reach|reaches|ship|ships|shipping|shipment|arrive|arrives|arrival|courier|parcel|transit|how\s+long|eta|kab\s+tak|kitne\s+din|eppo\s+varum|evlo\s+naal|ethana\s+naal)\b/;
+export function isDeliveryIsh(t: string): boolean {
+  const n = timingNorm(t);
+  return DELIVERY_ISH.test(n) && !NOT_TIMING.test(n);
+}
 
 function deliveryTimingAnswer(state: ChatState, t: string): Turn {
   state.pendingOffer = null;
@@ -1240,7 +1248,8 @@ function deliveryTimingAnswer(state: ChatState, t: string): Turn {
 
 function shippingAnswer(state: ChatState, t: string, opts: { sop?: boolean; place?: Place } = {}): Turn {
   const withSop = (opts.sop ?? true) && !CHENNAI.test(t);
-  const place = opts.place ?? findPlace(t);
+  // LB-18: misspelt places too ("do you ship to kolkatta" -> the care-first handoff).
+  const place = opts.place ?? findPlace(t) ?? findPlaceFuzzy(t);
   if (place) {
     state.lead.stateName ??= place.state;
     if (place.zone === "in") {
@@ -1868,7 +1877,13 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "unclear", tier: "fallback", faq: "FAQ 24",
     test: () => true,
-    run: ({ state }) => { state.pendingOffer = null; return { reply: ANSWERS.unclear, intent: "unclear" }; },
+    run: ({ state, t }) => {
+      // LB-18 broad fallback (Kiara 987208a, Lea): anything delivery- or timing-ish that nothing
+      // else matched gets the location + timing reply instead of "didn't catch that".
+      if (isDeliveryIsh(t)) return deliveryTimingAnswer(state, t);
+      state.pendingOffer = null;
+      return { reply: ANSWERS.unclear, intent: "unclear" };
+    },
   },
 ];
 

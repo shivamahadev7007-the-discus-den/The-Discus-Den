@@ -22,7 +22,7 @@ const ENTRIES: Entry[] = [
   [["madhya pradesh", "indore", "bhopal", "jabalpur", "gwalior", "ujjain"], "Madhya Pradesh", "in"],
   [["odisha", "orissa", "bhubaneswar", "cuttack", "rourkela", "puri", "sambalpur", "berhampur"], "Odisha", "in"],
   // Other states / UTs
-  [["delhi", "new delhi", "noida", "gurgaon", "gurugram", "faridabad", "ghaziabad"], "Delhi NCR", "other"],
+  [["delhi", "dilli", "new delhi", "noida", "gurgaon", "gurugram", "faridabad", "ghaziabad"], "Delhi NCR", "other"],
   [["goa", "panaji", "margao"], "Goa", "other"],
   [["gujarat", "ahmedabad", "surat", "vadodara", "baroda", "rajkot"], "Gujarat", "other"],
   [["rajasthan", "jaipur", "jodhpur", "udaipur", "kota"], "Rajasthan", "other"],
@@ -100,7 +100,7 @@ const SINGLE_WORD = COMPILED.filter((c) => !c.alias.includes(" ") && c.alias.len
 /** A known place behind a misspelt name ("how many days to banglore"); null if none or ambiguous. */
 export function findPlaceFuzzy(text: string): Place | null {
   const t = text.toLowerCase();
-  const words = [...t.matchAll(/\b(?:to|in|for|at|from|till|until|near|reach|reaches|arrive\s+(?:at|in))\s+([a-z]{5,})\b/g)].map((m) => m[1]!);
+  const words = [...t.matchAll(/\b(?:to|in|for|at|from|till|until|near|reach|reaches|arrive\s+(?:at|in))\s+(?=([a-z]{5,})\b)/g)].map((m) => m[1]!);
   for (const w of words) {
     if (FUZZY_STOP.has(w)) continue;
     let best: (typeof SINGLE_WORD)[number] | null = null;
