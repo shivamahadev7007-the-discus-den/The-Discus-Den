@@ -306,28 +306,56 @@ describe("LB-4 · /api/chat sends the email once per completed handoff", () => {
     }
   });
 
-  it("waitUntil available -> reply returns without waiting for the send; task handed to waitUntil", async () => {
+  it("LB-7 5 Oct: waitUntil is ignored — the send is awaited before the reply returns", async () => {
     const pending: Promise<unknown>[] = [];
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
     let sent = 0;
+    const store = createMemoryChatStore();
     const deps = {
-      store: createMemoryChatStore(),
+      store,
       catalog: offlineCatalog(),
       waitUntil: (p: Promise<unknown>) => pending.push(p),
       sendAlert: async () => {
-        await gate;
         sent += 1;
         return { sent: true, channel: "email" as const };
       },
     };
     const out = await runChat(deps, HANDOFF, "3f2b8c1e-9a4d-4e2f-8b6a-00000000e007");
     assert.equal(out[out.length - 1]!.status, 200);
-    assert.equal(pending.length, 1);
-    assert.equal(sent, 0);
-    release();
-    await Promise.all(pending);
-    assert.equal(sent, 1);
+    assert.equal(sent, 1, "send finished before the HTTP handler returned");
+    assert.equal(pending.length, 0, "waitUntil must not be used for lead alerts");
+    assert.equal(store.alerts.filter((a) => a.status === "sent").length, 1);
+  });
+
+  it("LB-7 5 Oct: a failed send leaves no phantom 'sent' — same IP can alert again", async () => {
+    const store = createMemoryChatStore();
+    const { fetchImpl: bad } = recorder(403);
+    const { fetchImpl: good, calls } = recorder(200);
+    const env = EMAIL_ENV;
+    const badDeps = {
+      store,
+      catalog: offlineCatalog(),
+      env,
+      sendAlert: (l: LeadForAlert, t: TranscriptLine[]) => sendLeadAlert(l, t, env, bad),
+    };
+    const goodDeps = {
+      store,
+      catalog: offlineCatalog(),
+      env,
+      sendAlert: (l: LeadForAlert, t: TranscriptLine[]) => sendLeadAlert(l, t, env, good),
+    };
+    const orig = console.warn;
+    console.warn = () => {};
+    try {
+      await runChat(badDeps, HANDOFF, "3f2b8c1e-9a4d-4e2f-8b6a-00000000e008");
+      assert.equal(store.alerts.filter((a) => a.status === "sent").length, 0);
+      assert.ok(store.alerts.some((a) => a.status === "failed"));
+      // Second handoff, same IP (post() uses one XFF), different session + number — must still send.
+      await runChat(goodDeps, [...OPEN, "Meena", "fish", "9123456780", "Kochi", "train", "ready now"], "3f2b8c1e-9a4d-4e2f-8b6a-00000000e009");
+    } finally {
+      console.warn = orig;
+    }
+    assert.equal(calls.length, 1, "second lead emailed after a failed first");
+    assert.equal(store.alerts.filter((a) => a.status === "sent").length, 1);
   });
 });
 

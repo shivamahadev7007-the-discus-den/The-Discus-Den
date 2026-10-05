@@ -64,8 +64,15 @@ export interface ChatStore {
   /**
    * LB-7: a "sent" decision whose alert did not actually go out is rewritten to
    * `outcome`, so it stops counting toward the phone / IP / global caps.
+   * If no optimistic row exists (LB-7 5 Oct: decide no longer inserts 'sent'),
+   * inserts the outcome directly so the lead's alert_status is still honest.
    */
   recordAlertOutcome(sessionId: string, outcome: AlertOutcome): Promise<void>;
+  /**
+   * LB-7 (5 Oct): record a real successful send. Caps only count status='sent',
+   * so this must run AFTER Resend accepts the email — never before.
+   */
+  confirmLeadAlertSent(input: Pick<AlertDecisionInput, "sessionId" | "phone" | "ipHash" | "nowMs">): Promise<void>;
   transcript(sessionId: string): Promise<TranscriptLine[]>;
 }
 
@@ -185,8 +192,9 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
 
     async decideLeadAlert(input) {
       const sql = await getSql();
-      // One statement: count + decide + record, so concurrent requests see each other's rows
-      // as soon as they commit (small races can let one extra through; caps are soft limits).
+      // Count only real successes (status='sent'). Suppressed decisions are written now;
+      // a cleared-to-send result returns 'sent' WITHOUT inserting — confirmLeadAlertSent
+      // writes the row only after Resend accepts (LB-7 5 Oct: no more phantom 'sent').
       const rows = await sql.query<{ status: AlertStatus }>(
         `with c as (
            select
@@ -194,26 +202,48 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
              (select count(*) from chat_alerts where $3::text is not null and ip_hash = $3 and status = 'sent' and created_at > now() - interval '24 hours') as by_ip,
              (select count(*) from chat_alerts where status = 'sent' and created_at > now() - interval '1 hour') as global_1h
          )
-         insert into chat_alerts (session_id, phone, ip_hash, status)
-         select $1, $2, $3,
-           case
-             when $2::text is not null and by_phone > 0 then 'suppressed_duplicate'
-             when $3::text is not null and by_ip >= $4 then 'suppressed_ip_cap'
-             when global_1h >= $5 then 'suppressed_global_cap'
-             else 'sent'
-           end
-         from c
-         returning status`,
+         select case
+           when $2::text is not null and by_phone > 0 then 'suppressed_duplicate'
+           when $3::text is not null and by_ip >= $4 then 'suppressed_ip_cap'
+           when global_1h >= $5 then 'suppressed_global_cap'
+           else 'sent'
+         end as status
+         from c`,
         [input.sessionId, input.phone, input.ipHash, input.ipCap, input.globalCap],
       );
       const status = rows[0]?.status ?? "suppressed_global_cap";
-      await sql.query("update chat_leads set alert_status = $2, updated_at = now() where session_id = $1", [input.sessionId, status]);
+      if (status !== "sent") {
+        await sql.query(
+          "insert into chat_alerts (session_id, phone, ip_hash, status) values ($1, $2, $3, $4)",
+          [input.sessionId, input.phone, input.ipHash, status],
+        );
+        await sql.query("update chat_leads set alert_status = $2, updated_at = now() where session_id = $1", [input.sessionId, status]);
+      }
       return status;
+    },
+
+    async confirmLeadAlertSent(input) {
+      const sql = await getSql();
+      await sql.query(
+        "insert into chat_alerts (session_id, phone, ip_hash, status) values ($1, $2, $3, 'sent')",
+        [input.sessionId, input.phone, input.ipHash],
+      );
+      await sql.query("update chat_leads set alert_status = 'sent', updated_at = now() where session_id = $1", [input.sessionId]);
     },
 
     async recordAlertOutcome(sessionId, outcome) {
       const sql = await getSql();
-      await sql.query("update chat_alerts set status = $2 where session_id = $1 and status = 'sent'", [sessionId, outcome]);
+      // Rewrite an optimistic 'sent' if one exists (pre-5-Oct path); otherwise insert.
+      const updated = await sql.query(
+        "update chat_alerts set status = $2 where session_id = $1 and status = 'sent' returning session_id",
+        [sessionId, outcome],
+      );
+      if (updated.length === 0) {
+        await sql.query(
+          "insert into chat_alerts (session_id, phone, ip_hash, status) values ($1, null, null, $2)",
+          [sessionId, outcome],
+        );
+      }
       await sql.query("update chat_leads set alert_status = $2, updated_at = now() where session_id = $1", [sessionId, outcome]);
     },
 
@@ -257,13 +287,34 @@ export function createMemoryChatStore() {
         },
         input,
       );
-      alerts.push({ sessionId: input.sessionId, phone: input.phone, ipHash: input.ipHash, status, at: input.nowMs });
-      const lead = leads.get(input.sessionId);
-      if (lead) lead.alertStatus = status;
+      // Cleared-to-send: do not push a 'sent' row yet (confirmLeadAlertSent does after Resend).
+      if (status !== "sent") {
+        alerts.push({ sessionId: input.sessionId, phone: input.phone, ipHash: input.ipHash, status, at: input.nowMs });
+        const lead = leads.get(input.sessionId);
+        if (lead) lead.alertStatus = status;
+      }
       return status;
     },
+    async confirmLeadAlertSent(input) {
+      alerts.push({
+        sessionId: input.sessionId,
+        phone: input.phone,
+        ipHash: input.ipHash,
+        status: "sent",
+        at: input.nowMs,
+      });
+      const lead = leads.get(input.sessionId);
+      if (lead) lead.alertStatus = "sent";
+    },
     async recordAlertOutcome(id, outcome) {
-      for (const a of alerts) if (a.sessionId === id && a.status === "sent") a.status = outcome;
+      let found = false;
+      for (const a of alerts) {
+        if (a.sessionId === id && a.status === "sent") {
+          a.status = outcome;
+          found = true;
+        }
+      }
+      if (!found) alerts.push({ sessionId: id, phone: null, ipHash: null, status: outcome, at: Date.now() });
       const lead = leads.get(id);
       if (lead) lead.alertStatus = outcome;
     },
