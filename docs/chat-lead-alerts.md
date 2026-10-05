@@ -15,8 +15,7 @@ because visitors often stop replying after the number; those answers stay in the
   `waitUntil` fire-and-forget left phantom `sent` rows when Vercel froze the isolate, which then
   tripped the per-phone / per-IP caps so later real leads got no email (LB-7, 5 Oct 2026).
 - A `chat_alerts` row with status `sent` is written **only after** Resend accepts the email.
-  Soft-fail: a mail error never blocks the chat reply (alert_status becomes `failed` / `not_sent_off`).
-  affect the chat reply. The lead is always stored in the DB either way.
+  Soft-fail: a mail error never blocks the chat reply (`alert_status` becomes `failed` / `not_sent_off`); the lead is always stored either way.
 - A successful send logs `[chat] lead alert sent: email via Resend id=<resend id>`.
 - `chat_alerts.status` / `chat_leads.alert_status`: `sent` only when the alert really went out;
   `failed` (mode=email but key missing / Resend error / timeout) and `not_sent_off` (mode off) do not
