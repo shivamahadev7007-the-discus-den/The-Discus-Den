@@ -11,8 +11,11 @@ because visitors often stop replying after the number; those answers stay in the
   `chat_leads.alert_sent_at` is claimed once in the DB, flood caps (`chat_alerts`) still apply,
   and Resend gets an `Idempotency-Key` of `tdd-chat-lead-<sessionId>`.
 - Provider: Resend, plain `fetch` to `https://api.resend.com/emails` (no SDK). 5 s timeout.
-- On Vercel the send runs via the request context's `waitUntil`, so the customer's reply is not held;
-  elsewhere it is awaited (bounded by the timeout). Failures log `[chat] lead alert failed: …` and never
+- The send is **awaited** before the HTTP reply returns (`sendLeadAlert` times out at 5 s). An earlier
+  `waitUntil` fire-and-forget left phantom `sent` rows when Vercel froze the isolate, which then
+  tripped the per-phone / per-IP caps so later real leads got no email (LB-7, 5 Oct 2026).
+- A `chat_alerts` row with status `sent` is written **only after** Resend accepts the email.
+  Soft-fail: a mail error never blocks the chat reply (alert_status becomes `failed` / `not_sent_off`).
   affect the chat reply. The lead is always stored in the DB either way.
 - A successful send logs `[chat] lead alert sent: email via Resend id=<resend id>`.
 - `chat_alerts.status` / `chat_leads.alert_status`: `sent` only when the alert really went out;

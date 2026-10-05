@@ -48,7 +48,7 @@ export type ChatDeps = {
   env?: Env;
   now?: () => number;
   sendAlert?: (lead: LeadForAlert, transcript: TranscriptLine[]) => Promise<LeadAlertResult>;
-  /** Run work after the response (tests inject this; on Vercel the request context's waitUntil is used). */
+  /** @deprecated LB-7 5 Oct: lead alerts are always awaited; kept for test API compat, ignored. */
   waitUntil?: (p: Promise<unknown>) => void;
 };
 
@@ -240,30 +240,29 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
             console.warn(`[chat] lead alert ${status} (lead stored in DB)`);
           } else {
             const send = deps.sendAlert ?? ((l, t) => sendLeadAlert(l, t, env));
-            const task = (async () => {
-              try {
-                const transcript = await deps.store.transcript(sid);
-                const out = await send({ sessionId: sid, source, state: result.state }, transcript);
-                if (out && out.sent === false) {
-                  // LB-7: only alerts that really went out count toward the caps.
-                  await deps.store.recordAlertOutcome(sid, out.channel === "off" ? "not_sent_off" : "failed");
-                }
-              } catch (err) {
-                console.warn("[chat] lead alert failed (soft)", err instanceof Error ? err.message : err);
-                await deps.store.recordAlertOutcome(sid, "failed").catch(() => undefined);
+            // LB-7 (5 Oct): ALWAYS await the send. waitUntil was fire-and-forget: Vercel can
+            // freeze the isolate after the response, so Resend never ran and recordAlertOutcome
+            // never rewrote the optimistic 'sent' row. Those phantom 'sent' rows then hit the
+            // per-phone (1/24h) and per-IP (2/24h) caps and suppressed every later real lead
+            // (Shiva got Juniper's one test email and nothing after). sendLeadAlert already
+            // times out at 5 s, so awaiting keeps the chat reply honest without hanging.
+            try {
+              const transcript = await deps.store.transcript(sid);
+              const out = await send({ sessionId: sid, source, state: result.state }, transcript);
+              if (out && out.sent) {
+                await deps.store.confirmLeadAlertSent({
+                  sessionId: sid,
+                  phone: result.state.lead.phone ?? null,
+                  ipHash,
+                  nowMs,
+                });
+              } else {
+                // LB-7: only alerts that really went out count toward the caps.
+                await deps.store.recordAlertOutcome(sid, out?.channel === "off" ? "not_sent_off" : "failed");
               }
-            })();
-            // Don't hold the customer's reply for the email: hand it to waitUntil when the
-            // platform has one; otherwise await (sendLeadAlert has its own 5 s timeout).
-            const waitUntil = deps.waitUntil ?? platformWaitUntil();
-            if (waitUntil) {
-              try {
-                waitUntil(task);
-              } catch {
-                await task;
-              }
-            } else {
-              await task;
+            } catch (err) {
+              console.warn("[chat] lead alert failed (soft)", err instanceof Error ? err.message : err);
+              await deps.store.recordAlertOutcome(sid, "failed").catch(() => undefined);
             }
           }
         }
