@@ -57,7 +57,8 @@ describe("LB-24 · shared device: an earlier chat's name / number never shows or
     assert.deepEqual(day2.lead, {});
     assert.ok(!JSON.stringify(day2).includes("Ravi") && !JSON.stringify(day2).includes("9845012345"), "no old details in the engine state");
     const out = await run(["Hi, I am Meena. Can I talk to the owner?", "What is my phone number?", "My number is 9123456780"], day2);
-    assert.equal(out[0]!.reply, ANSWERS.humanAskPhone("Meena", 0), "asks this chat's name for the number");
+    // LB-28: greeted by name first (this chat's name), then the number ask by name.
+    assert.equal(out[0]!.reply, `${ANSWERS.greetIntro("Hi", "Meena", false, 0)}\n\n${ANSWERS.humanAskPhone("Meena", 0)}`, "asks this chat's name for the number");
     assert.equal(out[1]!.reply, ANSWERS.privacyNoDetails(0));
     assert.match(out[1]!.reply, /can't show|not able to display/);
     assert.equal(out[2]!.reply, ANSWERS.handoffClose("Meena"));

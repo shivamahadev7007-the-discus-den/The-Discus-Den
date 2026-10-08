@@ -133,6 +133,12 @@ const ASK_DECLINED: readonly string[] = [
   "Okay. I'm here if you have any other questions.",
   "No problem at all. Feel free to ask anything else.",
 ];
+const GREET_KEEPER: readonly string[] = [
+  "lovely to meet a fellow Discus keeper!",
+  "always a pleasure to hear from a fellow Discus keeper!",
+  "great to meet another Discus lover!",
+];
+const GREET_NICE: readonly string[] = ["nice to meet you.", "lovely to hear from you.", "good to meet you."];
 /** Extra sentences that keep a composed reply unique past its pools' period (bijective digits). */
 const ROT_EXTRAS: readonly string[] = ["Thank you for your patience.", "We appreciate it.", "It only takes a moment.", "We're glad you're here.", "Happy to help.", "Thanks for asking."];
 function gcd(a: number, b: number): number {
@@ -280,6 +286,17 @@ export const ANSWERS = {
   privacyNoDetails: (k: unknown = 0): string => composeRot(k, [PRIVACY_ASK]),
   /** LB-24: the same question after a valid number was typed in this chat (still never shown). */
   privacyHasDetails: (k: unknown = 0): string => composeRot(k, [PRIVACY_HELD]),
+  /**
+   * LB-28 (Shiva, 8 Oct 6:10 PM): a greeting / intro returned in the same warm tone, by name
+   * (LB-13). `greet` echoes theirs ("Hi", "Hello", "Good evening"); `keeper` when they said
+   * they love / keep discus. Rotated per chat (never the same words twice).
+   */
+  greetIntro: (greet: string, name: string | null, keeper: boolean, k: unknown = 0, howAreYou = false): string =>
+    `${greet}${name ? ` ${name}` : ""}, ${composeRot(k, [keeper ? GREET_KEEPER : GREET_NICE])}${howAreYou ? " All good here, thanks for asking." : ""}`,
+  /** LB-28: after greetIntro when nothing else was asked yet (then the LB-13 fish-or-food question). */
+  greetIntroWelcome: "Welcome to The Discus Den. Our discus are raised, quarantined and held here until they're ready.",
+  /** LB-28: after greetIntro once the fish-or-food question was already asked this chat. */
+  greetIntroHelp: "How can I help today?",
   /** LB-25 / Kiara G5: "no" to an ask, rotated per chat (the 1st is the existing handoffDeclined line). */
   askDeclined: (k: unknown = 0): string => composeRot(k, [ASK_DECLINED]),
   /** LB-19: "yes" after an ask. */

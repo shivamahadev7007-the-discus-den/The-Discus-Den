@@ -82,7 +82,8 @@ describe("LB-22 · Shiva's live chat (2:03 PM), replayed exactly", () => {
     assert.equal(out[0]!.state.lead.name, "Arjun");
     assert.equal(out[0]!.state.lead.city, "Bangalore");
     assert.ok(r[0]!.endsWith(`\n\n${ANSWERS.humanAskPhone("Arjun", 0)}`), r[0]);
-    assert.ok(r[0]!.startsWith(ANSWERS.shipInStates), "Bangalore: we deliver by train, never a refusal");
+    // LB-28: the greeting + intro is returned warmly by name first ("Hey - how is it going. I am Arjun ...").
+    assert.ok(r[0]!.startsWith(`${ANSWERS.greetIntro("Hey", "Arjun", false, 0, true)}\n\n${ANSWERS.shipInStates}`), "Bangalore: we deliver by train, never a refusal");
     assert.match(r[1]!, /Current Stock.*Shopping Bag/s);
     assert.equal(ASK_RE.test(r[1]!), false, "the very next turn after ask 1 is not re-asked (interest rule)");
     assert.match(r[2]!, /\bArjun\b/);

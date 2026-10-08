@@ -721,7 +721,8 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
         replies.push(await say(deps, sid(226), "My number is 9123456780"));
         await end(deps, sid(226));
       });
-      assert.deepEqual(replies, [ANSWERS.humanAskPhone("Meena", 0), ANSWERS.privacyNoDetails(0), ANSWERS.handoffClose("Meena")]);
+      // LB-28: "Hi, I am Meena. ..." -> greeted by name first, then the number ask by name.
+      assert.deepEqual(replies, [`${ANSWERS.greetIntro("Hi", "Meena", false, 0)}\n\n${ANSWERS.humanAskPhone("Meena", 0)}`, ANSWERS.privacyNoDetails(0), ANSWERS.handoffClose("Meena")]);
       for (const r of replies) assert.doesNotMatch(r, /Ravi|9845012345|\d{2}x+\d{2}/i);
       assert.equal(sent.length, 2);
       assert.match(subjectOf(sent[0]!), /^\[Lead\] New chat lead: Ravi/);
