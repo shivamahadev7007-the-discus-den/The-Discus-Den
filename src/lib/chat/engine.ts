@@ -11,9 +11,9 @@
  * Live prices come from the injected CatalogLoader (catalog.ts).
  */
 
+import { createHash } from "node:crypto";
 import {
   ANSWERS,
-  firmPushReply,
   deliveryTimingFor,
   OWNER_FALLBACK,
   outOfAreaReply,
@@ -98,19 +98,20 @@ export type ChatState = {
    * LB-19: name + WhatsApp asks in this chat (max 2). `pending` = the last bot reply
    * asked; `awaitingName` = a number came without a name.
    */
-  contactAsk?: { count: number; lastTurn: number; pending: boolean; declined: boolean; awaitingName?: boolean; confirming?: boolean };
-  /** LB-19: details from an earlier chat on this browser session (sessionIds live forever). */
-  prior?: { name?: string; phone?: string; city?: string };
+  contactAsk?: { count: number; lastTurn: number; pending: boolean; declined: boolean; awaitingName?: boolean };
+  /**
+   * LB-24 (Shiva, 8 Oct 2:44 PM, privacy): SERVER-SIDE ONLY, never read by the engine and never
+   * shown: one-way hashes of valid numbers typed in earlier chats on this browser session.
+   * lead-alert uses it only to tag Shiva's email [Lead · returning] when the number typed IN
+   * THIS CHAT matches. (Replaces LB-19's `prior` name / phone / city, which shaped replies.)
+   */
+  onFile?: string[];
   /** LB-19: numbers typed this chat that failed the 10-digit mobile check. */
   badNumbers?: number;
   /** LB-19: LB-15 polite replies given this chat (rotation index). */
   pushFirms?: number;
-  /** LB-22: next rotation index per human-request reply kind (no reply repeats word for word in a chat). */
-  askRot?: { both?: number; phone?: number; name?: number; confirm?: number; yes?: number; no?: number };
-  /** LB-22: the visitor confirmed the name + number we have (this chat or on file). */
-  confirmedOnFile?: boolean;
-  /** LB-22: the visitor said the number on file from an earlier chat is wrong (never used again this chat). */
-  priorRejected?: boolean;
+  /** LB-22/25: next rotation index per reply kind (no reply repeats word for word in a chat). */
+  askRot?: { both?: number; phone?: number; name?: number; later?: number; passed?: number; privacy?: number; decline?: number };
 };
 
 export function newChatState(): ChatState {
@@ -141,18 +142,24 @@ export type EngineResult = {
   closedNow: boolean;
 };
 
+/** LB-24: one-way key of a valid number (server-side returning check; the number itself is never kept). */
+export function phoneKey(phone: string): string {
+  return createHash("sha256").update(`tdd-chat-phone:${phone.replace(/\D/g, "").slice(-10)}`).digest("hex").slice(0, 32);
+}
+
 /**
- * LB-19: a fresh engine state for a NEW chat on an existing browser session.
- * Per-chat counters (asks, pushes, handoff) reset; known details are carried as
- * `prior` (shown in the email, and the bot doesn't ask for a number it already has).
+ * LB-24 (privacy): a fresh engine state for a NEW chat on an existing browser session. A shared
+ * device means the next chat may be a different person, so NO name / number / city carries over:
+ * the bot only uses details typed in this chat. Only one-way keys of earlier valid numbers are kept
+ * (`onFile`, server-side, for the [Lead · returning] tag in Shiva's email).
  */
 export function newChatFrom(prev: ChatState | null | undefined): ChatState {
   const fresh = newChatState();
   if (!prev || prev.v !== 1) return fresh;
-  const name = prev.lead?.name ?? prev.prior?.name;
-  const phone = prev.lead?.phone ?? prev.prior?.phone;
-  const city = prev.lead?.city ?? prev.prior?.city;
-  if (name || phone || city) fresh.prior = { ...(name ? { name } : {}), ...(phone ? { phone } : {}), ...(city ? { city } : {}) };
+  const legacy = (prev as { prior?: { phone?: string } }).prior?.phone; // LB-19 sessions saved before LB-24
+  const keys = new Set(prev.onFile ?? []);
+  for (const p of [prev.lead?.phone, legacy]) if (p) keys.add(phoneKey(p));
+  if (keys.size) fresh.onFile = [...keys].slice(-10);
   if (prev.tags?.history) fresh.tags.history = prev.tags.history;
   return fresh;
 }
@@ -1144,18 +1151,6 @@ function contactAsk(state: ChatState): NonNullable<ChatState["contactAsk"]> {
   return (state.contactAsk ??= { count: 0, lastTurn: 0, pending: false, declined: false });
 }
 
-/** LB-22: a valid number for this visitor: typed in this chat, or on file from an earlier chat (not rejected). */
-function phoneOnFile(state: ChatState): string | undefined {
-  return state.lead.phone ?? (state.priorRejected ? undefined : state.prior?.phone);
-}
-function nameOnFile(state: ChatState): string | undefined {
-  return state.lead.name ?? state.prior?.name;
-}
-/** LB-22: "+919845012312" -> "98xxxxxx12" (first 2 and last 2 digits only). */
-export function maskPhone(phone: string): string {
-  const d = phone.replace(/\D/g, "").slice(-10);
-  return `${d.slice(0, 2)}xxxxxx${d.slice(-2)}`;
-}
 type RotKind = keyof NonNullable<ChatState["askRot"]>;
 function nextRot(state: ChatState, kind: RotKind): number {
   const rot = (state.askRot ??= {});
@@ -1165,46 +1160,47 @@ function nextRot(state: ChatState, kind: RotKind): number {
 }
 
 /**
- * LB-22: the personal ask for what we still need. Name + number known -> confirm (masked);
- * number only -> the name; name only -> the number (by name); neither -> name + number.
+ * LB-22/24: the personal ask for what this chat still needs. Only details typed IN THIS
+ * CHAT count (never anything from an earlier chat). Number only -> the name; name only ->
+ * the number (by name); neither -> name + number. `later` (LB-25, 3rd+ human request):
+ * one composed ask sentence + a "Shiva will get back to you personally" note.
  * Never says the details were passed. Sets the matching pending flags.
  */
-function personalAsk(state: ChatState): string {
+function personalAsk(state: ChatState, later = false): string {
   const a = contactAsk(state);
   a.pending = true;
-  const name = nameOnFile(state);
-  const phone = phoneOnFile(state);
-  if (phone && name) {
-    a.confirming = true;
-    return ANSWERS.humanConfirm(name, maskPhone(phone), nextRot(state, "confirm"));
-  }
-  if (phone) {
-    a.awaitingName = true;
-    return ANSWERS.humanAskName(nextRot(state, "name"));
-  }
-  if (name) return ANSWERS.humanAskPhone(name, nextRot(state, "phone"));
+  const { name, phone } = state.lead;
+  const kind: "both" | "phone" | "name" = phone ? "name" : name ? "phone" : "both";
+  if (kind === "name") a.awaitingName = true;
+  if (later) return ANSWERS.humanAskLater(kind, nextRot(state, "later"), name);
+  if (kind === "name") return ANSWERS.humanAskName(nextRot(state, "name"));
+  if (kind === "phone") return ANSWERS.humanAskPhone(name!, nextRot(state, "phone"));
   return ANSWERS.humanAskBoth(nextRot(state, "both"));
 }
 
 /**
- * LB-22 (Shiva, 8 Oct; replaces the LB-19 contactOrPush caps): EVERY "talk / connect to
- * Shiva / a human / the owner" gets the personal ask (or the confirmation), never capped.
- * From the 3rd request in a chat the LB-15 polite line is added in front, never instead.
+ * LB-22 + LB-25 (Shiva, 8 Oct): EVERY "talk / connect to Shiva / a human / the owner" request:
+ *  - a valid name + number typed in this chat -> "passed to Shiva, he'll get back personally"
+ *    (rotated, never re-asks);
+ *  - otherwise the ask for the missing piece, never capped; from the 3rd request the ask carries
+ *    the "Shiva will get back to you personally" note (LB-15's form line is no longer used here).
  * The request still uses up an interest ask (the max-2 cap on interest-triggered asks).
  */
 function contactOrPush(state: ChatState): Turn {
   state.humanPushes = (state.humanPushes ?? 0) + 1;
+  if (state.lead.name && state.lead.phone) {
+    return { reply: ANSWERS.humanPassed(state.lead.name, nextRot(state, "passed")), intent: "human_push" };
+  }
   const a = contactAsk(state);
   a.count += 1;
   a.lastTurn = state.turns;
-  const firm = state.humanPushes >= 3 ? firmPushReply((state.pushFirms = (state.pushFirms ?? 0) + 1) - 1) : undefined;
-  return { reply: join(firm, personalAsk(state)), intent: "human_push" };
+  return { reply: personalAsk(state, state.humanPushes >= 3), intent: "human_push" };
 }
 
 /** After a real-interest answer: append the ask (1st: photos; 2nd, a later interest turn: Shiva gets back personally; LB-21). */
 function maybeAppendAsk(state: ChatState, turn: Turn): Turn {
   if (!INTEREST_INTENT.test(turn.intent)) return turn;
-  if (state.lead.phone || state.confirmedOnFile || state.completed || state.handoff.active || state.pendingOffer === "lookingFor") return turn;
+  if (state.lead.phone || state.completed || state.handoff.active || state.pendingOffer === "lookingFor") return turn;
   const a = contactAsk(state);
   if (a.count >= 2 || a.pending) return turn;
   if (a.count === 1 && state.turns - a.lastTurn < 2) return turn;
@@ -1223,10 +1219,8 @@ function maybeAppendAsk(state: ChatState, turn: Turn): Turn {
   a.count += 1;
   a.lastTurn = state.turns;
   a.pending = true;
-  // LB-22: a number on file from an earlier chat (none typed here yet) -> the confirmation /
-  // name ask instead of asking for details we may already have.
-  // A volunteered name ("I am Arjun from ...") -> the number ask by name.
-  if (phoneOnFile(state) || nameOnFile(state)) return { ...turn, reply: join(reply, personalAsk(state)) };
+  // LB-22: a name typed in this chat ("I am Arjun from ...") -> the number ask by name.
+  if (state.lead.name) return { ...turn, reply: join(reply, personalAsk(state)) };
   return { ...turn, reply: join(reply, a.count === 1 ? ANSWERS.contactAskPhotos : ANSWERS.contactAskReserve) };
 }
 
@@ -1246,6 +1240,10 @@ const NOT_NAME_WORDS = new Set([
   "any", "time", "evening", "morning", "after", "before", "pm", "am", "only", "or", "best", "same", "below", "above", "he", "him", "she",
   "they", "them", "if", "need", "want", "interested", "buy", "order", "please", "details", "photos", "videos", "pics",
 ]);
+
+/** LB-24: the visitor asks the bot to show their own saved details. */
+const PRIVACY_ASK =
+  /\b(what('?s|\s+is|\s+was|\s+are)\s+my\s+(phone(\s+number)?|number|mobile(\s+number)?|whatsapp(\s+number)?|contact(\s+number|\s+details)?|name|details|email)|what\s+(number|phone\s+number|name|details|contact|whatsapp\s+number)\s+(do\s+you\s+have|have\s+you\s+got|did\s+i\s+(give|share|type|send|say)|is\s+saved|have\s+you\s+saved)|(repeat|read|tell|show|confirm|give)\s+(me\s+)?(back\s+)?my\s+(details|number|phone(\s+number)?|name|contact|whatsapp(\s+number)?)|do\s+you\s+(have|know|remember)\s+my\s+(number|phone(\s+number)?|name|details|whatsapp)|which\s+number\s+(did\s+i|do\s+you|have\s+you)|my\s+details\s+(back|please))\b/;
 
 /** LB-22: a person-seeking message (talk / connect / reach Shiva, a human, the owner...). */
 function isPersonRequest(t: string): boolean {
@@ -1335,8 +1333,6 @@ export function looksLikeBadNumber(raw: string): boolean {
 function contactAck(state: ChatState): Turn {
   const a = contactAsk(state);
   a.pending = false;
-  // LB-22: a name for a number on file from an earlier chat (none typed here): confirm it first.
-  if (!state.lead.phone) return { reply: personalAsk(state), intent: "contact_confirm" };
   if (state.lead.name) {
     state.completed = true;
     a.awaitingName = false;
@@ -1392,7 +1388,7 @@ function pleasantryReply(state: ChatState, kind: Pleasantry): Turn {
   if (kind === "bye") return { reply: ANSWERS.bye, intent: "bye" };
   // LB-19 fix (Kiara #2): after the closing message (or with the number known), "thanks" is just a thanks.
   // LB-22: also once the bot has asked for name + number this chat ("okay, thanks" is a plain thanks).
-  const known = state.askedLookingFor || state.lookingForHint || state.lead.lookingFor || state.handoff.active || state.completed || Boolean(phoneOnFile(state)) || (state.contactAsk?.count ?? 0) > 0;
+  const known = state.askedLookingFor || state.lookingForHint || state.lead.lookingFor || state.handoff.active || state.completed || Boolean(state.lead.phone) || (state.contactAsk?.count ?? 0) > 0;
   const lead = kind === "new" ? ANSWERS.welcomeNewHobbyist : kind === "thanks" ? ANSWERS.youreWelcome : ANSWERS.welcomeGreeting;
   const intent = kind === "new" ? "welcome_new" : kind === "thanks" ? "thanks" : "welcome";
   if (known) {
@@ -1883,6 +1879,18 @@ export const INTENT_RULES: readonly IntentRule[] = [
     id: "owner", tier: "safety", faq: "B12: owner name from site",
     test: (m) => RE.owner.test(m.t),
     run: ({ state, ctx }) => ownerAnswer(state, ctx),
+  },
+  {
+    // LB-24 (Shiva, 8 Oct, privacy): "what is my phone number / name / details?" -> never shows
+    // anything saved (a shared device may be someone else); invites them to type it.
+    id: "privacy_details", tier: "safety", faq: "LB-24: no saved details shown",
+    test: (m) => PRIVACY_ASK.test(m.t),
+    run: ({ state }) => {
+      state.pendingOffer = null;
+      if (state.lead.phone) return { reply: ANSWERS.privacyHasDetails(nextRot(state, "privacy")), intent: "privacy_details" };
+      contactAsk(state).pending = true;
+      return { reply: ANSWERS.privacyNoDetails(nextRot(state, "privacy")), intent: "privacy_details" };
+    },
   },
   {
     id: "are_you_human", tier: "safety", faq: "Rules: are you a person",
@@ -2435,11 +2443,9 @@ async function chatTurn(state: ChatState, raw: string, t: string, ctx: Ctx): Pro
   const a = state.contactAsk;
   const wasPending = Boolean(a?.pending);
   const awaitingName = Boolean(a?.awaitingName);
-  const wasConfirming = Boolean(a?.confirming);
   if (a) {
     a.pending = false;
     a.awaitingName = false;
-    a.confirming = false;
   }
   const short = t.split(" ").length <= 5;
 
@@ -2475,30 +2481,14 @@ async function chatTurn(state: ChatState, raw: string, t: string, ctx: Ctx): Pro
 
   // A plain "no" / "yes" to the ask (only when the message isn't a question of its own).
   const generic = ["unclear", "ack", "off_topic", "offer_declined", "small_talk", "thanks"].includes(turn.intent);
-  // LB-22: "yes" / "no" to the confirmation of the name + number we have.
-  if (!phone && wasConfirming && short && generic) {
-    if (RE.negate.test(t) || RE.declineField.test(t) || RE.cancel.test(t)) {
-      if (!state.lead.phone) state.priorRejected = true;
-      contactAsk(state).pending = true;
-      state.pendingOffer = null;
-      return { reply: ANSWERS.humanConfirmNo(nextRot(state, "no")), intent: "contact_confirm_no" };
-    }
-    const plainThanks = /\b(thanks?|thank\s*(you|u)|thanku|thx|ty)\b/.test(t) && !/\b(yes|yeah|yep|yup|correct|right|exactly|haan|ha|aama|aamaa|sari|seri)\b/.test(t);
-    if (RE.affirm.test(t) && !/\?/.test(raw) && !plainThanks) {
-      state.pendingOffer = null;
-      state.confirmedOnFile = true;
-      const first = !state.completed;
-      state.completed = true;
-      return { reply: ANSWERS.humanConfirmYes(nameOnFile(state) ?? "", nextRot(state, "yes")), intent: "contact_confirmed", completedNow: first };
-    }
-  }
   // LB-22: "okay, thanks" after an ask is a plain thanks, not a "yes".
   const thanked = /\b(thanks?|thank\s*(you|u)|thanku|thx|ty)\b/.test(t);
   if (!phone && wasPending && short && generic) {
     if (RE.negate.test(t) || RE.declineField.test(t) || RE.cancel.test(t)) {
       contactAsk(state).declined = true;
       state.pendingOffer = null;
-      return { reply: ANSWERS.handoffDeclined, intent: "contact_declined" };
+      // LB-25 / G5: repeated declines never get the same words twice (1st = handoffDeclined).
+      return { reply: ANSWERS.askDeclined(nextRot(state, "decline")), intent: "contact_declined" };
     }
     if (RE.affirm.test(t) && !/\?/.test(raw) && !thanked) {
       contactAsk(state).pending = true;
@@ -2516,7 +2506,7 @@ async function chatTurn(state: ChatState, raw: string, t: string, ctx: Ctx): Pro
     }
   }
   // LB-22: a name typed after an ask ("I am Ravi") -> ask for the number by name.
-  if (!phone && wasPending && !hadName && state.lead.name && !phoneOnFile(state) && (turn.intent === "name_given" || turn.intent === "unclear")) {
+  if (!phone && wasPending && !hadName && state.lead.name && !state.lead.phone && (turn.intent === "name_given" || turn.intent === "unclear")) {
     contactAsk(state).pending = true;
     return { reply: ANSWERS.humanAskPhone(state.lead.name, nextRot(state, "phone")), intent: "contact_name" };
   }

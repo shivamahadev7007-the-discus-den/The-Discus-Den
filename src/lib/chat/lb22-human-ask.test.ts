@@ -1,12 +1,12 @@
 /**
  * LB-22 (High, Shiva 8 Oct 2:13 PM via Lea) + LB-21 part 2. Kiara's cases:
  * /workspace/the-discus-den/lb22-test-cases.md (updated 2:15 PM to Lea's spec).
- *  - EVERY human / owner / Shiva request asks for name + WhatsApp (not capped): confirm a
- *    valid name + number (masked 98xxxxxx12), the number by name, the name, or both.
- *  - The bot never says details were passed unless a valid number exists (this chat, or on
- *    file for a known returning customer).
+ *  - EVERY human / owner / Shiva request asks for name + WhatsApp (not capped): the number by
+ *    name, the name, or both. LB-24/25 (2:44 PM): the masked confirmation is removed; with a
+ *    valid name + number typed in this chat the reply says "passed" instead (no re-ask).
+ *  - The bot never says details were passed unless a valid number was typed IN THIS CHAT.
  *  - Rotations: no human-request reply repeats word for word in a chat; from the 3rd request
- *    the LB-15 line is added in front of the ask, never instead of it.
+ *    the ask carries "Shiva will get back to you personally" (LB-25 replaced the LB-15 line).
  *  - Buy / order / pay questions trigger the first interest ask; "I am Arjun from Bangalore"
  *    gives the name and the city.
  *  - LB-21 part 2: no ask promises photos, videos, reservations or stock alerts.
@@ -15,9 +15,9 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ANSWERS, firmPushReply } from "./answers.ts";
+import { ANSWERS } from "./answers.ts";
 import type { CatalogLoader } from "./catalog.ts";
-import { introName, maskPhone, newChatFrom, respond, type ChatState } from "./engine.ts";
+import { introName, newChatFrom, respond, type ChatState } from "./engine.ts";
 import { guardReply } from "./guard.ts";
 
 const catalog: CatalogLoader = {
@@ -42,10 +42,10 @@ async function run(messages: string[], start: ChatState | null = null) {
 export const CLAIM = /\b(I've|I have)\s+(already\s+)?(passed|shared|sent)\b|\bpassed your (details|number)\b|\bShiva has your (details|number)\b|\bShiva will contact you\b/i;
 /** G2 / LB-21 part 2: no ask promises any of these. */
 const PROMISE = /reserve|stock|photo|video|book/i;
-const ASK_RE = /name and WhatsApp number|What's your WhatsApp number|share your WhatsApp number|Type your WhatsApp number|best WhatsApp number for him|^I have you as |Just to check: is |Shiva can reach you as |Can you confirm /m;
+const ASK_RE = /WhatsApp number|your name|name should|name is all|name to pass|name Shiva|name whenever/i;
 
 function hasValidNumber(s: ChatState): boolean {
-  return Boolean(s.lead.phone || (s.prior?.phone && !s.priorRejected));
+  return Boolean(s.lead.phone); // LB-24: only a number typed in this chat
 }
 function assertG1(r: { reply: string; state: ChatState }, ctx: string): void {
   if (CLAIM.test(r.reply)) assert.ok(hasValidNumber(r.state), `claim without a valid number: ${ctx} -> ${r.reply}`);
@@ -62,9 +62,10 @@ function assertSafe(text: string): void {
 function allAskLines(): string[] {
   const out: string[] = [ANSWERS.contactAskPhotos, ANSWERS.contactAskReserve, ANSWERS.contactAskTalk, ANSWERS.contactAskTalk2, ANSWERS.contactAskYes];
   for (let k = 0; k < 4; k++) {
-    out.push(ANSWERS.humanAskBoth(k), ANSWERS.humanAskPhone("Arjun", k), ANSWERS.humanAskName(k), ANSWERS.humanConfirm("Arjun", "98xxxxxx12", k));
+    out.push(ANSWERS.humanAskBoth(k), ANSWERS.humanAskPhone("Arjun", k), ANSWERS.humanAskName(k));
   }
-  for (let k = 0; k < 3; k++) out.push(ANSWERS.humanConfirmYes("Arjun", k), ANSWERS.humanConfirmNo(k));
+  for (let k = 0; k < 120; k++) out.push(ANSWERS.humanAskLater("both", k), ANSWERS.humanAskLater("phone", k, "Arjun"), ANSWERS.humanAskLater("name", k));
+  for (let k = 0; k < 4; k++) out.push(ANSWERS.privacyNoDetails(k));
   return out;
 }
 
@@ -95,14 +96,12 @@ describe("LB-22 · Shiva's live chat (2:03 PM), replayed exactly", () => {
       assertSafe(o.reply);
     }
   });
-  it("Shiva's actual production state (a number on file from an earlier test chat): no false 'already passed'; the number is confirmed, masked", async () => {
+  it("LB-24: Shiva's actual production state (a number on file from an earlier test chat) -> exactly the fresh replies; nothing from the earlier chat", async () => {
     const prior = newChatFrom({ ...(await run(["Shiva 9845012312"])).at(-1)!.state });
     const out = await run(SHIVA, prior);
-    const r = out.map((o) => o.reply);
-    assert.ok(r[0]!.endsWith(ANSWERS.humanConfirm("Arjun", "98xxxxxx12", 0)), r[0]);
-    assert.equal(r[2], ANSWERS.humanConfirm("Arjun", "98xxxxxx12", 1));
-    assert.equal(r[3], ANSWERS.thanks, "'okay, thanks' is not taken as a yes to the confirmation");
-    for (const o of out) assert.doesNotMatch(o.reply, /already passed/);
+    const cold = await run(SHIVA);
+    assert.deepEqual(out.map((o) => o.reply), cold.map((o) => o.reply));
+    for (const o of out) assert.doesNotMatch(o.reply, /already passed|I have you as|\d{2}x+\d{2}|Shiva 98/);
   });
   it("Kiara case 1 T4: a valid number after the T3 ask -> saved, closing line by name", async () => {
     const out = await run([...SHIVA.slice(0, 3), "My WhatsApp number is 9845012312"]);
@@ -198,56 +197,37 @@ describe("LB-22 · never 'passed' without a valid number (Kiara case 3)", () => 
   });
 });
 
-describe("LB-22 · confirmation with a valid number (Kiara case 4 / 6)", () => {
-  it("case 4: 'I am Priya, my number is 9123456780' then 'Can I talk to Shiva?' -> masked confirmation, no re-ask", async () => {
+describe("LB-22/25 · details typed in this chat (Kiara LB-22 case 4 / 6)", () => {
+  it("case 4: 'I am Priya, my number is 9123456780' then 'Can I talk to Shiva?' -> 'passed' (LB-25), no re-ask", async () => {
     const out = await run(["I am Priya, my number is 9123456780", "Can I talk to Shiva?"]);
     assert.equal(out[0]!.reply, ANSWERS.handoffClose("Priya"));
-    assert.equal(out[1]!.reply, ANSWERS.humanConfirm("Priya", "91xxxxxx80", 0));
-    assert.equal(out[1]!.reply, "I have you as Priya, 91xxxxxx80. Is that right? Shiva will get back to you on it.");
+    assert.equal(out[1]!.reply, ANSWERS.humanPassed("Priya", 0));
+    assert.equal(ASK_RE.test(out[1]!.reply), false);
   });
-  it("'yes' -> Shiva gets back on that number (a true claim now); 'no' -> asks for the right number, a new number closes", async () => {
-    const yes = await run(["Ravi 9845012345", "talk to shiva", "yes"]);
-    assert.equal(yes[2]!.reply, ANSWERS.humanConfirmYes("Ravi", 0));
-    assert.equal(yes[2]!.state.confirmedOnFile, true);
-    const no = await run(["Ravi 9845012345", "talk to shiva", "no", "it's 9845012399"]);
-    assert.equal(no[2]!.reply, ANSWERS.humanConfirmNo(0));
-    assert.equal(no[3]!.state.lead.phone, "+919845012399");
-    assert.equal(no[3]!.reply, ANSWERS.handoffClose("Ravi"));
-    for (const o of [...yes, ...no]) assertG1(o, "confirm");
-  });
-  it("case 6: returning customer (number on file) -> confirm; 'yes' closes as a true claim; 'no' never reuses the old number", async () => {
+  it("case 6 (LB-24): returning session -> a fresh ask (nothing on file is used or confirmed)", async () => {
     const day1 = await run(["What is the price of Blue Diamond?", "I'm Ravi, 9845012345"]);
     const day2 = newChatFrom(day1.at(-1)!.state);
-    const yes = await run(["Can I talk to the owner?", "yes"], day2);
-    assert.equal(yes[0]!.reply, ANSWERS.humanConfirm("Ravi", "98xxxxxx45", 0));
-    assert.equal(yes[1]!.reply, ANSWERS.humanConfirmYes("Ravi", 0));
-    assert.equal(yes[1]!.closedNow, true, "the confirmation is the closing message of that chat");
-    const no = await run(["Can I talk to the owner?", "no", "connect me to Shiva"], day2);
-    assert.equal(no[1]!.reply, ANSWERS.humanConfirmNo(0));
-    assert.equal(no[1]!.state.priorRejected, true);
-    assert.equal(no[2]!.reply, ANSWERS.humanAskPhone("Ravi", 0), "the rejected number is not confirmed again");
-    for (const o of [...yes, ...no]) assertG1(o, "case 6");
+    const out = await run(["Can I talk to the owner?", "no"], day2);
+    assert.equal(out[0]!.reply, ANSWERS.humanAskBoth(0));
+    assert.equal(out[1]!.reply, ANSWERS.handoffDeclined, "'no' to an ask is a decline (no confirmation flow)");
+    for (const o of out) assert.doesNotMatch(o.reply, /Ravi|\d{2}x+\d{2}/);
   });
   it("number first (no name), then a human request -> asks for the name; the name then closes", async () => {
     const out = await run(["9845012345", "Can I talk to Shiva?", "Meena"]);
     assert.equal(out[1]!.reply, ANSWERS.humanAskName(0));
     assert.equal(out[2]!.reply, ANSWERS.handoffClose("Meena"));
   });
-  it("maskPhone shows the first 2 and last 2 digits only", () => {
-    assert.equal(maskPhone("+919845012312"), "98xxxxxx12");
-    assert.equal(maskPhone("+916123456789"), "61xxxxxx89");
-  });
 });
 
 describe("LB-22 · uncapped, rotated, never verbatim (Kiara case 5)", () => {
-  it("5a: ask, no, ask, no, ask (3rd: LB-15 line + ask), ask; never a claim; no two replies identical", async () => {
+  it("5a: ask, no, ask, no, ask (3rd: composed ask + note, LB-25), ask; never a claim; no two replies identical", async () => {
     const out = await run(["Can I talk to a human?", "No thanks", "I really want to speak to the owner", "No", "Connect me to Shiva", "Please let me talk to a human"]);
     const r = out.map((o) => o.reply);
     assert.equal(r[0], ANSWERS.humanAskBoth(0));
     assert.equal(r[2], ANSWERS.humanAskBoth(1));
-    assert.equal(r[4], `${firmPushReply(0)}\n\n${ANSWERS.humanAskBoth(2)}`, "LB-15 line alongside the ask, never instead");
-    assert.equal(r[5], `${firmPushReply(1)}\n\n${ANSWERS.humanAskBoth(3)}`);
-    for (const i of [0, 2, 4, 5]) assert.match(r[i]!, /name and WhatsApp number/);
+    assert.equal(r[4], ANSWERS.humanAskLater("both", 0));
+    assert.equal(r[5], ANSWERS.humanAskLater("both", 1));
+    for (const i of [0, 2, 4, 5]) assert.match(r[i]!, /name and (a |the best )?WhatsApp number|name with a WhatsApp number/);
     for (const o of out) assertG1(o, "5a");
   });
   it("5b: interest asks stay capped at 2 (price -> ask 1; no; strain -> ask 2; no; delivery, visit -> none)", async () => {
@@ -267,16 +247,18 @@ describe("LB-22 · uncapped, rotated, never verbatim (Kiara case 5)", () => {
     ["number known", ["9845012345"]],
     ["name + number known", ["Arjun 9845012312"]],
   ] as const) {
-    it(`12 consecutive human requests (${label}): every reply asks / confirms, no two identical in the chat`, async () => {
+    it(`12 consecutive human requests (${label}): every reply asks (or says passed once both are typed), no two identical`, async () => {
       const pushes = ["talk to a human", "connect me to Shiva", "speak to the owner", "real person please", "can I talk to Shiva?", "let me speak to someone"];
       const msgs = Array.from({ length: 12 }, (_, i) => pushes[i % pushes.length]!);
       const out = (await run([...start, ...msgs])).slice(start.length);
       const r = out.map((o) => o.reply);
       assert.equal(new Set(r).size, r.length, "never word for word");
+      const both = label === "name + number known";
       for (let i = 0; i < r.length; i++) {
-        assert.ok(ASK_RE.test(r[i]!) || [0, 1, 2, 3].some((k) => r[i]!.endsWith(ANSWERS.humanAskName(k))), `${i}: ${r[i]}`);
-        if (i >= 2) assert.ok(r[i]!.startsWith(firmPushReply(i - 2)), `LB-15 line from the 3rd request: ${i}`);
-        else assert.ok(!/Kindly place your requirement/.test(r[i]!));
+        if (both) assert.ok(r[i]!.startsWith("Thanks") || /^(Noted|All set|Got it)/.test(r[i]!), r[i]);
+        else assert.ok(ASK_RE.test(r[i]!), `${i}: ${r[i]}`);
+        if (i >= 2 && !both) assert.match(r[i]!, /Shiva[^.]*get back to you personally/, `LB-25 note from the 3rd request: ${i}`);
+        assert.doesNotMatch(r[i]!, /Kindly place your requirement|fill in the form/);
         assertG1(out[i]!, label);
         assertSafe(r[i]!);
       }
@@ -327,14 +309,14 @@ describe("LB-21 part 2 / G2: asks promise only passing to Shiva", () => {
   });
   it("the first ask and the first talk reply only promise passing to Shiva; the 2nd ask reads differently from the 1st", () => {
     assert.equal(ANSWERS.contactAskPhotos, "May I have your name and WhatsApp number? I'll pass them to Shiva so he can get back to you personally.");
-    assert.equal(ANSWERS.contactAskTalk, "Sure, I can pass your request to Shiva. May I have your name and WhatsApp number? He'll get back to you personally.");
+    // LB-25 / Kiara G5: the first talk reply no longer shares "May I have your name and WhatsApp number?" with the first ask.
+    assert.equal(ANSWERS.contactAskTalk, "Sure, I can pass your request to Shiva. Could you share your name and WhatsApp number? He'll get back to you personally.");
     assert.notEqual(ANSWERS.contactAskPhotos, ANSWERS.contactAskReserve);
     assert.equal(ANSWERS.humanAskBoth(0), ANSWERS.contactAskTalk);
     assert.equal(ANSWERS.humanAskBoth(1), ANSWERS.contactAskTalk2);
   });
   it("no ask line claims the details were passed (only the closing / confirmed lines may, with a valid number)", () => {
     for (const a of allAskLines()) {
-      if ([0, 1, 2].some((k) => a === ANSWERS.humanConfirmYes("Arjun", k))) continue;
       assert.doesNotMatch(a, CLAIM, a);
     }
   });

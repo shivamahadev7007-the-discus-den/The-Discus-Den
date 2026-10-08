@@ -120,11 +120,12 @@ export function faqIdOf(reply: string): string {
   if (/^Thanks(, [^.]+)?\. What's the best WhatsApp/.test(first)) return "handoff:phone";
   if (/^Thanks, [^.]+\. How can I help\?/.test(first)) return "name-given";
   if (/^Thank you(, [^.]+)?\. I've passed this to Shiva/.test(first)) return "handoff:close";
-  // LB-22: human-request asks and the confirmation of the name + number on file.
-  if (/^(I have you as |Just to check: is |Shiva can reach you as |Happy to pass this to Shiva\. Can you confirm )/.test(first)) return "LB-22 confirm";
   for (let k = 0; k < 4; k++) if (first === ANSWERS.humanAskName(k)) return "LB-22 ask name";
   if (/^(Thanks|Sure|Of course), [^.]+\. (What's your WhatsApp number|Please share your WhatsApp number|Type your WhatsApp number)|^Happy to pass this to Shiva, [^.]+\. What's the best WhatsApp number/.test(first)) return "LB-22 ask number";
-  if (/^(Thanks|Perfect|Great, thanks),? [^.]*\. Shiva (will get back to you personally on that number|has your details|will reach you on that number)/.test(first)) return "LB-22 confirmed";
-  for (let k = 0; k < 3; k++) if (first === ANSWERS.humanConfirmNo(k)) return "LB-22 fix number";
+  // LB-24 / LB-25: privacy reply, rotated declines, composed later asks and "passed" replies.
+  for (let k = 1; k < 5; k++) if (first === ANSWERS.askDeclined(k)) return "declined";
+  for (let k = 0; k < 3; k++) if (first === ANSWERS.privacyNoDetails(k) || first === ANSWERS.privacyHasDetails(k)) return "LB-24 privacy";
+  if (/^(Thanks|Noted|All set|Got it|Thanks again), [^.]+\. (I've passed your details to Shiva|Your name and number from this chat are with Shiva|Shiva already has your details|I've shared your details with Shiva)/.test(first)) return "LB-25 passed";
+  if (/get back to you personally/.test(first) && /WhatsApp number|your name/i.test(first)) return "LB-25 ask";
   return "other";
 }

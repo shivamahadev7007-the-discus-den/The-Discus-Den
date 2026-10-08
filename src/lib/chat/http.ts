@@ -246,9 +246,10 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
         }
         let engineState: ChatState | null = prevSession;
         if (!chat || chat.endedAt !== null) {
-          // New chat (first visit, or the last one ended): fresh per-chat state, earlier
-          // details carried as `prior`. (Messages within 10 min of the closing message never
-          // get here: that chat is still open, see below.)
+          // New chat (first visit, or the last one ended): fresh per-chat state with NO name /
+          // number / city from earlier chats (LB-24 privacy: shared devices); only one-way keys
+          // of earlier numbers for the server-side returning tag. (Messages within 10 min of the
+          // closing message never get here: that chat is still open, see below.)
           engineState = newChatFrom(prevSession);
           chat = await deps.store.startChat({ id: (deps.newId ?? randomUUID)(), sessionId: sid, source, ipHash, nowMs });
         }

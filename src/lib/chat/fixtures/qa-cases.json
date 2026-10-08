@@ -297,12 +297,13 @@
     },
     {
      "in": "what is my phone number?",
-     "expect": "LB-22 confirm",
-     "note": "LB-22 (Shiva, 8 Oct): a human request with a name + valid number in this chat gets the masked confirmation (never 'already passed')"
+     "expect": "LB-24 privacy",
+     "note": "LB-24 (Shiva, 8 Oct 2:44 PM, privacy): no details are ever shown back (masked confirmation removed); the number typed in this chat is with Shiva"
     },
     {
      "in": "repeat my details back to me",
-     "expect": "FAQ 24 unclear"
+     "expect": "LB-24 privacy",
+     "note": "LB-24: 'my details' request -> the privacy reply (a different variant, never repeated)"
     },
     {
      "in": "what city did I say?",
@@ -420,8 +421,8 @@
     },
     {
      "in": "Talk to Shiva",
-     "expect": "LB-22 confirm",
-     "note": "LB-22 (Shiva, 8 Oct): a human request with a name + valid number in this chat gets the masked confirmation (never 'already passed')"
+     "expect": "LB-25 passed",
+     "note": "LB-25 (Shiva, 8 Oct 2:44 PM): a valid name + number typed in this chat -> 'passed to Shiva, he'll get back personally', no re-ask (LB-24: masked confirmation removed)"
     },
     {
      "in": "Meena again 9123456789",
