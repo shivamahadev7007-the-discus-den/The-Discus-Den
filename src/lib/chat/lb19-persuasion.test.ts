@@ -63,10 +63,50 @@ describe("LB-19 · ask after the first real-interest question", () => {
       assert.equal(asks([r!.reply]), 0, `${r!.intent}: ${r!.reply}`);
     });
   }
-  it("store visit offers the handoff itself (no second ask stacked on it)", async () => {
-    const [r] = await run(["Can I visit the store?"]);
-    assert.equal(r!.state.pendingOffer, "handoff");
-    assert.equal(asks([r!.reply]), 0);
+  // ---- LB-19 fix round (Kiara's report, item 6 / failure 4) ----
+  for (const m of ["Which strains do you have?", "What strains are available?", "Is Red Ninja available?", "what fish do you have?"]) {
+    it(`first STRAIN question gets the ask (in place of 'Want me to narrow it down...'): '${m}'`, async () => {
+      const [r] = await run([m]);
+      assert.ok(r!.reply.endsWith(`\n\n${ASK1}`), `${r!.intent}: ${r!.reply}`);
+      assert.doesNotMatch(r!.reply, /narrow it down/, "one question at a time");
+      assert.equal(r!.state.pendingOffer, null);
+      assertNeverShare(r!.reply);
+    });
+  }
+  it("a strain that isn't listed: the ask replaces 'Shall I ask him?' (the STRAIN NOT LISTED flag stays)", async () => {
+    const [r] = await run(["Do you have pigeon blood discus?"]);
+    assert.ok(r!.reply.startsWith("That one isn't on our available page right now."), r!.reply);
+    assert.ok(r!.reply.endsWith(ASK1));
+    assert.doesNotMatch(r!.reply, /Shall I ask him/);
+    assert.ok(r!.state.flags.some((f) => f.startsWith("STRAIN NOT LISTED")));
+  });
+  for (const m of ["Can I visit your shop?", "Can I visit the store?", "What's your address and timings?", "Chennai la pickup irukka?"]) {
+    it(`first VISIT / pickup question gets the name + WhatsApp ask, not 'Shall I pass your details?': '${m}'`, async () => {
+      const [r] = await run([m]);
+      assert.ok(r!.reply.endsWith(`\n\n${ASK1}`), `${r!.intent}: ${r!.reply}`);
+      assert.doesNotMatch(r!.reply, /Shall I pass your details|Want me to pass your details/);
+      assert.equal(r!.state.contactAsk?.count, 1);
+    });
+  }
+  it("visit ask -> name + number -> closing message", async () => {
+    const out = await run(["Can I visit your shop?", "Ravi 9876500001"]);
+    assert.equal(out[1]!.reply, ANSWERS.handoffClose("Ravi"));
+    assert.equal(out[1]!.closedNow, true);
+  });
+  it("visit ask -> 'yes' -> the guided visit handoff (LB-9 flow) still opens", async () => {
+    const out = await run(["Can I visit your shop?", "yes"]);
+    assert.equal(out[1]!.reply, ANSWERS.handoffAskName);
+    assert.equal(out[1]!.state.handoff.active, true);
+  });
+  it("visit ask -> 'no thanks' -> 'No problem.' (counts as a decline)", async () => {
+    const out = await run(["Can I visit your shop?", "no thanks"]);
+    assert.equal(out[1]!.reply, ANSWERS.handoffDeclined);
+    assert.equal(out[1]!.state.contactAsk?.declined, true);
+  });
+  it("visit after both asks are used: the old visit offer is back (no third ask)", async () => {
+    const out = await run(["price of blue diamond?", "hmm", "do you ship to Kochi?", "Can I visit your shop?"]);
+    assert.equal(asks(out.map((o) => o.reply)), 2);
+    assert.equal(out[3]!.reply, ANSWERS.visit);
   });
 });
 
@@ -113,6 +153,17 @@ describe("LB-19 · a number typed anywhere is saved", () => {
     ["name: Arun Kumar, whatsapp 7012345678", "+917012345678", "Arun Kumar"],
     ["this is Meena from Coimbatore, 6382012345", "+916382012345", "Meena"],
     ["call me on 8012345678", "+918012345678", undefined],
+    // LB-19 fix round (Kiara #6): the words around a number are not a name.
+    ["You can reach me on 6123456789", "+916123456789", undefined],
+    ["you can call me at 9876500001", "+919876500001", undefined],
+    ["feel free to whatsapp me on 9876500001", "+919876500001", undefined],
+    ["I am on 9876500001", "+919876500001", undefined],
+    ["my whatsapp number is 9876500001", "+919876500001", undefined],
+    ["reach me at 9876500001 - Meena", "+919876500001", "Meena"],
+    ["Meena here, 9876500020", "+919876500020", "Meena"],
+    ["+91-98765-00001", "+919876500001", undefined],
+    ["919876500001", "+919876500001", undefined],
+    ["0 98765 00001", "+919876500001", undefined],
   ];
   for (const [msg, phone, name] of VALID) {
     it(`'${msg}' -> phone ${phone}${name ? `, name ${name}` : ""}`, async () => {
@@ -158,7 +209,10 @@ describe("LB-19 · a number typed anywhere is saved", () => {
 });
 
 describe("LB-19 · human check: invalid numbers get a polite recheck, never a Lead", () => {
-  for (const m of ["12345 67890", "98450 1234", "9876543210", "my number is 5551234567", "+91 12345 678901", "99999 99999"]) {
+  // LB-19 fix round (Kiara #5): a country code + a short number is never read as a mobile
+  // ("+91 98765 000" used to be saved as +919198765000).
+  for (const m of ["12345 67890", "98450 1234", "9876543210", "my number is 5551234567", "+91 12345 678901", "99999 99999",
+    "+91 98765 000", "91 98765 000", "+91 98765", "+9198765000", "98765 0001", "5876500037", "98765000381", "+1 415 555 0101"]) {
     it(`'${m}' -> recheck`, async () => {
       const [r] = await run([m]);
       assert.equal(r!.reply, ANSWERS.phoneInvalid, r!.intent);
@@ -167,6 +221,18 @@ describe("LB-19 · human check: invalid numbers get a polite recheck, never a Le
       assertNeverShare(r!.reply);
     });
   }
+  it("Kiara's repro: price question, then '+91 98765 000' -> recheck, nothing saved, never a Lead", async () => {
+    const out = await run(["What is the price of Blue Diamond?", "+91 98765 000", "I'm Ravi"]);
+    assert.equal(out[1]!.reply, ANSWERS.phoneInvalid);
+    assert.equal(out[2]!.state.lead.phone, undefined);
+    assert.equal(out.some((o) => o.closedNow), false);
+  });
+  it("Kiara's repro: 'You can reach me on 6123456789' -> number saved, then 'What name should he use…'; the name comes next", async () => {
+    const out = await run(["What is the price of Blue Diamond?", "You can reach me on 6123456789", "Ravi"]);
+    assert.equal(out[1]!.reply, ANSWERS.contactNeedName);
+    assert.equal(out[1]!.state.lead.name, undefined);
+    assert.equal(out[2]!.reply, ANSWERS.handoffClose("Ravi"));
+  });
   it("recheck then a valid number -> saved", async () => {
     const out = await run(["98450 1234", "Ravi 98450 12345"]);
     assert.equal(out[1]!.state.lead.phone, "+919845012345");
@@ -218,6 +284,11 @@ describe("LB-19 · new chat on the same browser session", () => {
     const out = await run(["price of blue diamond?", "talk to shiva"], fresh);
     assert.equal(asks([out[0]!.reply]), 0, "no ask for a number we already have");
     assert.equal(out[1]!.reply, ANSWERS.handoffAlreadyDone);
+  });
+  it("'thanks' after the closing message is a plain thanks (no 'Discus fish or frozen foods?' re-ask)", async () => {
+    const out = await run(["What is the price of Blue Diamond?", "I'm Ravi Kumar, 9876500001", "thanks"]);
+    assert.equal(out[2]!.reply, ANSWERS.thanks);
+    assert.doesNotMatch(out[2]!.reply, /frozen foods/);
   });
   it("isCourtesyOnly: thanks / bye / ok, not questions", () => {
     for (const t of ["thanks", "thank you", "ok thanks", "bye", "ok", "great thanks", "thx", "ok bye", "nandri"]) assert.ok(isCourtesyOnly(t), t);

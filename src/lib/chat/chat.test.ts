@@ -97,6 +97,23 @@ async function viaHandoff(messages: string[], catalog?: CatalogLoader) {
   return (await chat([...OPEN, ...messages], catalog)).slice(1);
 }
 
+/**
+ * LB-19 fix (Kiara #4, 8 Oct): on the first real-interest answer the name + WhatsApp ask
+ * REPLACES a trailing offer ("Shall I pass your details?", "Want me to pass your details?",
+ * "Shall I ask him?"). chat() strips the ask; this is the answer the visitor sees above it.
+ */
+function asAsk(answer: string): string {
+  return answer.replace(/\s*(Shall I|Want me to|Want Shiva to|Or I can)[^.?\n]*[.?]\s*$/i, "").trim();
+}
+/**
+ * LB-19 fix (Kiara #2): emails now go at chat END only (the closing message keeps the chat
+ * open 10 more quiet minutes). HTTP tests end the chat the way the widget does: /api/chat/end.
+ */
+async function endChatHttp(deps: Parameters<typeof handleChatEnd>[1], sessionId: string, ip?: string): Promise<void> {
+  const res = await handleChatEnd(post({ sessionId }, ip ? { "x-forwarded-for": ip } : {}), deps);
+  assert.equal(res.status, 204);
+}
+
 async function one(message: string, catalog?: CatalogLoader) {
   const r = await chat([message], catalog);
   return r[0]!;
@@ -212,14 +229,16 @@ describe("live prices from /available (mocked HTML)", () => {
 
   it("strain not on the page -> not listed + flag, never echoes a price", async () => {
     const r = await one("Do you have pigeon blood discus?");
-    assert.equal(r.reply, ANSWERS.strainNotListedAsk);
+    // LB-19 fix: the first interest answer carries the name + WhatsApp ask in place of "Shall I ask him?".
+    assert.equal(r.reply, asAsk(ANSWERS.strainNotListedAsk));
+    assert.ok(r.asked);
     assert.ok(r.state.flags.some((f) => f.startsWith("STRAIN NOT LISTED")));
     assert.doesNotMatch(r.reply, /₹/);
   });
 
   it("'leopard snakeskin' is not mistaken for the Blue Snakeskin card", async () => {
     const r = await one("price of leopard snakeskin?");
-    assert.equal(r.reply, ANSWERS.strainNotListedAsk);
+    assert.equal(r.reply, asAsk(ANSWERS.strainNotListedAsk)); // LB-19 fix: ask replaces the offer
   });
 
   it("out-of-stock strain is treated as not available", () => {
@@ -387,9 +406,10 @@ describe("policies", () => {
   it("shipping cost / ordering / pickup / quarantine / visit", async () => {
     assert.equal((await one("How much is shipping?")).reply, ANSWERS.shippingCost);
     assert.equal((await one("How do I order?")).reply, `${ANSWERS.ordering}\n\n${SOP_BLOCK}`);
-    assert.equal((await one("Chennai la pickup irukka?")).reply, ANSWERS.pickup);
+    // LB-19 fix (Kiara #4): pickup / visit are first interest questions: the ask replaces the offer.
+    assert.equal((await one("Chennai la pickup irukka?")).reply, asAsk(ANSWERS.pickup));
     assert.equal((await one("Are your fish quarantined?")).reply, ANSWERS.quarantine);
-    assert.equal((await one("What's your address and timings?")).reply, ANSWERS.visit);
+    assert.equal((await one("What's your address and timings?")).reply, asAsk(ANSWERS.visit));
   });
 
   it("reseller -> trade reply + tag", async () => {
@@ -680,15 +700,19 @@ describe("HTTP /api/chat", () => {
       const res = await handleChatRequest(post({ sessionId: SID, message, source: "fb" }), deps);
       replies.push(((await res.json()) as { reply: string }).reply);
     }
+    // LB-19 fix (Kiara #2): the closing message after "ready now" sends nothing yet; the two
+    // messages after it stay in the SAME chat, and the ONE email goes when the chat ends.
+    assert.equal(alerts.length, 0);
+    await endChatHttp(deps, SID);
     assert.equal(alerts.length, 1);
     assert.equal(alerts[0]!.lead.state.lead.phone, "+919845012345");
-    // LB-19 (Shiva, 8 Oct 11:37): sent at chat END - here the closing message after "ready now" -
-    // with the full transcript of that chat (8 visitor + 8 bot lines), not on the number turn.
-    assert.equal(alerts[0]!.transcript.length, 16);
-    assert.equal(alerts[0]!.lead.chat?.endReason, "closing");
+    // Full transcript of that chat incl. the post-close messages (10 visitor + 10 bot lines).
+    assert.equal(alerts[0]!.transcript.length, 20);
+    assert.equal(alerts[0]!.lead.chat?.endReason, "beacon");
     assert.equal(alerts[0]!.lead.state.lead.lookingFor, "Discus fish");
     assert.equal(store.leads.get(SID)!.completed, true);
-    // The next message starts a new chat; its push is told the details were already passed.
+    assert.equal(store.chats.size, 1, "post-close messages did not start a new chat");
+    // A push after the close is told the details were already passed.
     assert.equal(replies[8], ANSWERS.handoffAlreadyDone);
     for (const r of replies) assert.doesNotMatch(r, /9845012345|98450/);
   });
@@ -855,7 +879,7 @@ describe("Kiara run 1 · B13 Tamil/Tanglish (FAQ 24)", () => {
     assert.match(r.reply, /₹3,250 per piece/);
   });
   it("other B13 prompts keep working", async () => {
-    assert.equal((await one("Chennai la pickup irukka?")).reply, ANSWERS.pickup);
+    assert.equal((await one("Chennai la pickup irukka?")).reply, asAsk(ANSWERS.pickup)); // LB-19 fix: ask replaces the offer
     assert.match((await one("Yellow Diamonds evlo?")).reply, /Yellow Diamonds, 2–2\.5 inch, ₹850 per piece/);
     assert.equal((await one("Bangalore ku delivery pannuveengala?")).reply, SHIP_SOP);
     assert.match((await one("beginner ku endha fish nalla irukkum?")).reply, /A good entry strain is Yellow Diamonds/);
@@ -970,6 +994,7 @@ describe("Kiara run 1 · E2 alert flooding", () => {
     for (const message of [...OPEN, intro, "fish", "Chennai pickup", "ready now"]) {
       await handleChatRequest(post({ sessionId: sid, message, source: "site" }, { "x-forwarded-for": ip }), deps);
     }
+    await endChatHttp(deps, sid, ip); // LB-19 fix: the email goes at chat end
   }
   function alertDeps(nowRef: { t: number }) {
     const store = createMemoryChatStore();
@@ -1027,30 +1052,43 @@ describe("Kiara run 1 · E2 alert flooding", () => {
     assert.equal(store.alerts.filter((a) => a.status === "suppressed_duplicate").length, 0);
   });
 
-  it("global cap: 25 distinct IPs/numbers within an hour -> 20 alerts, overflow stored as suppressed", async () => {
+  // LB-19 fix (Kiara #3): the global hourly cap applies to Visitor emails only; Leads are never
+  // capped and don't count toward it.
+  it("global cap: 25 Visitor chats from distinct IPs within an hour -> 20 emails, 5 recorded as capped; Leads after that still email", async () => {
     const nowRef = { t: 1_700_000_000_000 };
     const { store, sent, deps } = alertDeps(nowRef);
     for (let i = 0; i < 25; i += 1) {
-      await runLead(deps, uuidFor(300 + i), `I'm Guest, 981${String(1000000 + i)}, from Chennai`, `10.60.${i}.1`);
+      const sid = uuidFor(300 + i);
+      await handleChatRequest(post({ sessionId: sid, message: "price of blue diamond", source: "site" }, { "x-forwarded-for": `10.60.${i}.1` }), deps);
+      await endChatHttp(deps, sid, `10.60.${i}.1`);
     }
     assert.equal(sent.length, ALERT_CAPS.globalPerHour);
     assert.equal(store.alerts.filter((a) => a.status === "suppressed_global_cap").length, 5);
-    assert.equal(store.leads.get(uuidFor(324))!.alertStatus, "suppressed_global_cap");
+    assert.equal([...store.chats.values()].filter((c) => c.emailStatus === "capped").length, 5);
+    for (let i = 0; i < 3; i += 1) {
+      await runLead(deps, uuidFor(330 + i), `I'm Meena, 98765000${String(20 + i)}, from Chennai`, `10.61.${i}.1`);
+    }
+    assert.equal(sent.length, ALERT_CAPS.globalPerHour + 3, "Leads are never held back by the hourly cap");
+    assert.equal(store.leads.get(uuidFor(332))!.alertStatus, "sent");
   });
 
-  it("caps are configurable by env", async () => {
+  it("caps are configurable by env (Visitor emails; Leads never capped)", async () => {
     const nowRef = { t: 1_700_000_000_000 };
     const { sent, deps } = alertDeps(nowRef);
     const envDeps = { ...deps, env: { CHAT_ALERT_GLOBAL_CAP_HOUR: "1", CHAT_ALERT_IP_CAP_24H: "0" } };
     for (let i = 0; i < 3; i += 1) {
-      await runLead(envDeps, uuidFor(400 + i), `I'm Guest, 982${String(1000000 + i)}, from Chennai`, `10.70.0.${i}`);
+      const sid = uuidFor(400 + i);
+      await handleChatRequest(post({ sessionId: sid, message: "price of blue diamond", source: "site" }), { ...envDeps, env: { CHAT_ALERT_GLOBAL_CAP_HOUR: "1" } });
+      await endChatHttp({ ...envDeps, env: { CHAT_ALERT_GLOBAL_CAP_HOUR: "1" } }, sid, `10.70.0.${i}`);
     }
-    assert.equal(sent.length, 1, "global cap 1/hour");
+    assert.equal(sent.length, 1, "global cap 1/hour (Visitors)");
+    await runLead(envDeps, uuidFor(405), "I'm Guest, 9821000005, from Chennai", "10.70.0.9");
+    assert.equal(sent.length, 2, "a Lead is never capped, even with both caps at their minimum");
     const sid = uuidFor(410);
     nowRef.t += 2 * 3600 * 1000;
     await handleChatRequest(post({ sessionId: sid, message: "hi", source: "site" }, { "x-forwarded-for": "10.70.1.1" }), envDeps);
     await handleChatEnd(post({ sessionId: sid }, { "x-forwarded-for": "10.70.1.1" }), envDeps);
-    assert.equal(sent.length, 1, "visitor IP cap 0");
+    assert.equal(sent.length, 2, "visitor IP cap 0");
   });
 });
 
@@ -1194,7 +1232,7 @@ describe("C1 · LB-2: availability only, never a quantity (Shiva's ruling, 3 Oct
     assert.match(r.reply, /^• Ghost Test Strain: out of stock right now\./);
   });
   it("strain not on the site -> 'not on our available page'", async () => {
-    assert.equal((await one("how many leopard snakeskin left?")).reply, ANSWERS.strainNotListedAsk);
+    assert.equal((await one("how many leopard snakeskin left?")).reply, asAsk(ANSWERS.strainNotListedAsk)); // LB-19 fix
   });
   it("bundle unreadable -> no in/out guess, points to /available", async () => {
     const cat = createCatalogLoader({ fetch: mockFetch({ "/available": AVAILABLE_HTML }) });
@@ -1483,6 +1521,9 @@ describe("LB-6: steer to the site instead of a handoff", () => {
       const res = await handleChatRequest(post({ sessionId: sid, message, source: "site" }), deps);
       assert.equal(res.status, 200, message);
     }
+    assert.equal(alerts.length, 0, "LB-19 fix: nothing until the chat ends");
+    await endChatHttp(deps, sid);
+    await endChatHttp(deps, sid);
     assert.equal(alerts.length, 1);
     assert.equal(alerts[0]!.state.lead.name, "Ravi");
     assert.equal(alerts[0]!.state.lead.phone, "+919845012345");
@@ -1495,6 +1536,7 @@ describe("LB-6: steer to the site instead of a handoff", () => {
     for (const message of ["my fish arrived dead", "yes", "Ravi", "9845012345", "Kochi", "train", "ready now", "talk to a human"]) {
       await handleChatRequest(post({ sessionId: sid, message, source: "site" }), deps);
     }
+    await endChatHttp(deps, sid); // LB-19 fix: the email goes at chat end
     assert.equal(alerts.length, 1);
     assert.ok(alerts[0]!.state.flags.includes("DOA CLAIM"));
   });
@@ -1610,7 +1652,7 @@ describe("Kiara LB-6 run (7a73e2c): regressions", () => {
     ["C5", ["how do I pay, full amount first?"], is(ANSWERS.payAdvance)],
     ["C6", ["do you quarantine before shipping?"], is(`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine}\n\n${SOP_BLOCK}\n\n${ANSWERS.shipInStates}`)],
     ["C7", ["can I pick up from the station?"], is(STATION_SOP)],
-    ["C8", ["Chennai, can I collect from store?"], is(ANSWERS.pickup)],
+    ["C8", ["Chennai, can I collect from store?"], is(asAsk(ANSWERS.pickup))], // LB-19 fix: ask replaces the offer
     ["C9", ["can you keep my fish for 2 weeks? I'm travelling"], is(ANSWERS.holding)],
     ["D1", ["just chatting, what's your favourite fish lol"], is(ANSWERS.smallTalk)],
     ["D2", ["tell me everything about discus care"], is(ANSWERS.careTips)],
@@ -1720,13 +1762,13 @@ describe("Kiara LB-6 run (7a73e2c): regressions", () => {
       const r = await one(m);
       assert.equal(r.reply, STATION_SOP);
       assert.match(r.reply, /railway agent's contact/);
-      assert.notEqual(r.reply, ANSWERS.pickup);
+      assert.notEqual(r.reply, asAsk(ANSWERS.pickup));
       assert.equal(r.state.pendingOffer, null);
     });
   }
   it("C8 control: Chennai store pickup is still FAQ 12, not the train SOP", async () => {
     const r = await one("Chennai, can I collect from store?");
-    assert.equal(r.reply, ANSWERS.pickup);
+    assert.equal(r.reply, asAsk(ANSWERS.pickup)); // LB-19 fix: ask replaces the offer
     assert.doesNotMatch(r.reply, /railway/);
   });
 
@@ -1805,6 +1847,7 @@ describe("Kiara LB-6 run (7a73e2c): regressions", () => {
       const res = await handleChatRequest(post({ sessionId: resell, message, source: "site" }), deps);
       assert.equal(res.status, 200, message);
     }
+    await endChatHttp(deps, resell); // LB-19 fix: the email goes at chat end
     assert.equal(alerts.length, 1);
     assert.ok(alerts[0]!.state.flags.includes("RESELLER"));
   });
@@ -1942,6 +1985,7 @@ describe("LB-6 rulings: out-of-area handoff, discount and quantity without hando
       const res = await handleChatRequest(post({ sessionId: kol, message, source: "site" }), deps);
       assert.equal(res.status, 200, message);
     }
+    await endChatHttp(deps, kol); // LB-19 fix: the email goes at chat end (post-close messages included)
     const kolAlerts = alerts.slice(before);
     assert.equal(kolAlerts.length, 1, "out-of-area handoff emails exactly once");
     assert.ok(kolAlerts[0]!.state.flags.includes("OUTSIDE 8 STATES"));
@@ -2184,6 +2228,8 @@ describe("LB-15: escalating, never-identical replies to repeated pushes", () => 
       replies.push(((await res.json()) as { reply: string }).reply);
     }
     for (let i = 1; i < replies.length; i++) assert.notEqual(replies[i], replies[i - 1]);
+    assert.equal(alerts.length, 0, "LB-19 fix: the closing message no longer sends at once");
+    await endChatHttp(deps, sid);
     assert.equal(alerts.length, 1);
     assert.equal(replies[3], ANSWERS.handoffClose("Ravi"));
   });

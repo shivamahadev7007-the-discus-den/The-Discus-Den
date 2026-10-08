@@ -30,28 +30,41 @@ export type LeadForAlert = {
   chat?: ChatMeta;
 };
 
-/** LB-19 tags (Shiva, 8 Oct 11:37): Lead = a name AND a valid mobile were captured in this chat; otherwise Visitor. */
-export function chatTag(s: ChatState): { tag: "Lead" | "Visitor"; likelyGenuine: boolean } {
-  const tag = s.lead.phone && s.lead.name ? "Lead" : "Visitor";
+/**
+ * LB-19 tags (Shiva, 8 Oct 11:37): Lead = a name AND a valid mobile were captured in this
+ * chat; otherwise Visitor. LB-19 fix (Kiara #2 note): a returning visitor whose name +
+ * valid mobile are already known from an earlier chat on the same browser is tagged
+ * "Lead · returning" (never an "Unnamed visitor" Visitor email, and never capped).
+ */
+export function chatTag(s: ChatState): { tag: "Lead" | "Visitor"; likelyGenuine: boolean; returning: boolean } {
+  const fresh = Boolean(s.lead.phone && s.lead.name);
+  const returning = !fresh && Boolean(s.prior?.phone && (s.prior?.name || s.lead.name));
+  const tag = fresh || returning ? "Lead" : "Visitor";
   // Visitor with a name and a city: probably a real buyer even without a number.
   const likelyGenuine = tag === "Visitor" && !s.lead.phone && Boolean(s.lead.name && (s.lead.city || s.lead.stateName));
-  return { tag, likelyGenuine };
+  return { tag, likelyGenuine, returning };
+}
+
+/** Name / phone for the email: this chat's, else the one known from an earlier chat. */
+function shownName(s: ChatState): string | null {
+  return s.lead.name ?? s.prior?.name ?? null;
 }
 
 const END_REASON: Record<string, string> = {
   beacon: "visitor closed the chat",
   idle: "10 min with no messages",
-  closing: "closing message after details were collected",
+  closing: "closing message after details were collected, then 10 min with no messages",
 };
 
 /** LB-19: Tag / Name / Phone / City / Source / timestamps block (top of every chat email). */
 export function chatHeaderLines(lead: LeadForAlert): string[] {
   const s = lead.state;
-  const { tag, likelyGenuine } = chatTag(s);
+  const { tag, likelyGenuine, returning } = chatTag(s);
+  const earlier = " (from an earlier chat)";
   const lines = [
-    `Tag:         ${tag}${likelyGenuine ? " · likely genuine" : ""}`,
-    `Name:        ${s.lead.name ?? "not given"}`,
-    `Phone:       ${s.lead.phone ?? "not given"}`,
+    `Tag:         ${tag}${likelyGenuine ? " · likely genuine" : ""}${returning ? " · returning (details known from an earlier chat)" : ""}`,
+    `Name:        ${s.lead.name ?? (s.prior?.name ? `${s.prior.name}${earlier}` : "not given")}`,
+    `Phone:       ${s.lead.phone ?? (s.prior?.phone ? `${s.prior.phone}${earlier}` : "not given")}`,
     `City:        ${s.lead.city ?? s.lead.stateName ?? "not given"}`,
     `Source:      ?from=${lead.source || "direct"}`,
   ];
@@ -185,18 +198,22 @@ export function buildLeadAlertEmail(
   opts: { to: string; from?: string; now?: Date },
 ): LeadAlertEmail {
   const s = lead.state;
-  const name = oneLine(s.lead.name ?? "Unnamed visitor");
+  const name = oneLine(shownName(s) ?? "Unnamed visitor");
   const email = customerEmailFromTranscript(transcript);
   const summary = leadSummary(s);
-  const { tag, likelyGenuine } = chatTag(s);
+  const { tag, likelyGenuine, returning } = chatTag(s);
   // LB-19: every subject is tagged Lead or Visitor.
   const subject = oneLine(
-    tag === "Lead" ? `[Lead] New chat lead: ${name} — ${summary}` : `[Visitor${likelyGenuine ? " · likely genuine" : ""}] Website chat: ${name} — ${summary}`,
+    returning
+      ? `[Lead · returning] Website chat: ${name} — ${summary}`
+      : tag === "Lead"
+        ? `[Lead] New chat lead: ${name} — ${summary}`
+        : `[Visitor${likelyGenuine ? " · likely genuine" : ""}] Website chat: ${name} — ${summary}`,
   ).slice(0, 200);
   const header = chatHeaderLines(lead);
   const card = formatLeadAlert(lead, opts.now ?? new Date());
   const contact = [
-    `Phone/WhatsApp: ${s.lead.phone ?? "not given"}`,
+    `Phone/WhatsApp: ${s.lead.phone ?? s.prior?.phone ?? "not given"}`,
     `Email: ${email ?? "not given"}`,
   ];
   const flagsLine = s.flags.length ? s.flags.join(" · ") : "none";
@@ -232,7 +249,7 @@ export function buildLeadAlertEmail(
     `<pre style="margin:0 0 12px;font-size:12px">${escapeHtml(header.join("\n"))}</pre>`,
     `<p style="margin:0 0 12px"><strong>Summary:</strong> ${escapeHtml(summary)}</p>`,
     `<ul style="margin:0 0 12px;padding-left:18px">`,
-    `<li><strong>Phone/WhatsApp:</strong> ${escapeHtml(s.lead.phone ?? "not given")}</li>`,
+    `<li><strong>Phone/WhatsApp:</strong> ${escapeHtml(s.lead.phone ?? s.prior?.phone ?? "not given")}</li>`,
     `<li><strong>Email:</strong> ${escapeHtml(email ?? "not given")}</li>`,
     `<li><strong>Tags:</strong> ${escapeHtml(flagsLine)}</li>`,
     `</ul>`,

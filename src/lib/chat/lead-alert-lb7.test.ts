@@ -65,6 +65,13 @@ async function endChat(deps: Parameters<typeof handleChatEnd>[1], id: string, ip
   return handleChatEnd(req, deps);
 }
 
+/** LB-19 fix (Kiara #2): a whole chat, then the widget's /end (the email goes at chat end, not at the closing message). */
+async function runAndEnd(deps: Parameters<typeof handleChatRequest>[1], msgs: string[], id: string, ip = "203.0.113.70") {
+  const out = await runChat(deps, msgs, id, ip);
+  await endChat(deps, id, ip);
+  return out;
+}
+
 async function quiet<T>(fn: () => Promise<T>): Promise<{ result: T; logs: string[] }> {
   const logs: string[] = [];
   const [l, w] = [console.log, console.warn];
@@ -110,7 +117,7 @@ describe("LB-7 · alert fires when the lead is actionable", () => {
 
   it("full handoff -> still exactly one email (not one at the number and another at the end)", async () => {
     const { calls, fetchImpl } = recorder();
-    const { result: out } = await quiet(() => runChat(emailDeps(createMemoryChatStore(), fetchImpl), [...FULL, "thanks", "Can I visit the store?"], sid(7002)));
+    const { result: out } = await quiet(() => runAndEnd(emailDeps(createMemoryChatStore(), fetchImpl), [...FULL, "thanks", "Can I visit the store?"], sid(7002)));
     assert.ok(out.every((o) => o.status === 200));
     assert.equal(calls.length, 1);
   });
@@ -141,15 +148,15 @@ describe("LB-7 · only real sends count toward the caps", () => {
     const store = createMemoryChatStore();
     const off = recorder();
     await quiet(async () => {
-      await runChat(emailDeps(store, off.fetchImpl, {}), FULL, sid(7101));
-      await runChat(emailDeps(store, off.fetchImpl, {}), FULL, sid(7102));
-      await runChat(emailDeps(store, off.fetchImpl, {}), FULL, sid(7103));
+      await runAndEnd(emailDeps(store, off.fetchImpl, {}), FULL, sid(7101));
+      await runAndEnd(emailDeps(store, off.fetchImpl, {}), FULL, sid(7102));
+      await runAndEnd(emailDeps(store, off.fetchImpl, {}), FULL, sid(7103));
     });
     assert.equal(off.calls.length, 0);
     assert.deepEqual(store.alerts.map((a) => a.status), ["not_sent_off", "not_sent_off", "not_sent_off"]);
 
     const on = recorder();
-    await quiet(() => runChat(emailDeps(store, on.fetchImpl), FULL, sid(7104)));
+    await quiet(() => runAndEnd(emailDeps(store, on.fetchImpl), FULL, sid(7104)));
     assert.equal(on.calls.length, 1);
     assert.equal(store.leads.get(sid(7104))?.alertStatus, "sent");
   });
@@ -157,23 +164,23 @@ describe("LB-7 · only real sends count toward the caps", () => {
   it("Resend 403 -> recorded as failed, logged, and the retry lead with the same number still emails", async () => {
     const store = createMemoryChatStore();
     const bad = recorder(403);
-    const { logs } = await quiet(() => runChat(emailDeps(store, bad.fetchImpl), FULL, sid(7201)));
+    const { logs } = await quiet(() => runAndEnd(emailDeps(store, bad.fetchImpl), FULL, sid(7201)));
     assert.equal(bad.calls.length, 1);
     assert.equal(store.leads.get(sid(7201))?.alertStatus, "failed");
     assert.ok(logs.some((l) => /lead alert failed: Resend HTTP 403/.test(l)));
 
     const good = recorder();
-    await quiet(() => runChat(emailDeps(store, good.fetchImpl), FULL, sid(7202)));
+    await quiet(() => runAndEnd(emailDeps(store, good.fetchImpl), FULL, sid(7202)));
     assert.equal(good.calls.length, 1);
   });
 
   it("missing RESEND_API_KEY -> failed (not sent), next lead not suppressed", async () => {
     const store = createMemoryChatStore();
     const r = recorder();
-    await quiet(() => runChat(emailDeps(store, r.fetchImpl, { CHAT_LEAD_ALERT_MODE: "email", CHAT_LEAD_ALERT_EMAIL_TO: "owner@example.com" }), FULL, sid(7301)));
+    await quiet(() => runAndEnd(emailDeps(store, r.fetchImpl, { CHAT_LEAD_ALERT_MODE: "email", CHAT_LEAD_ALERT_EMAIL_TO: "owner@example.com" }), FULL, sid(7301)));
     assert.equal(r.calls.length, 0);
     assert.equal(store.alerts[0]?.status, "failed");
-    await quiet(() => runChat(emailDeps(store, r.fetchImpl), FULL, sid(7302)));
+    await quiet(() => runAndEnd(emailDeps(store, r.fetchImpl), FULL, sid(7302)));
     assert.equal(r.calls.length, 1);
   });
 
@@ -182,8 +189,8 @@ describe("LB-7 · only real sends count toward the caps", () => {
     const store = createMemoryChatStore();
     const r = recorder();
     await quiet(async () => {
-      await runChat(emailDeps(store, r.fetchImpl), FULL, sid(7401));
-      await runChat(emailDeps(store, r.fetchImpl), FULL, sid(7402));
+      await runAndEnd(emailDeps(store, r.fetchImpl), FULL, sid(7401));
+      await runAndEnd(emailDeps(store, r.fetchImpl), FULL, sid(7402));
     });
     assert.equal(r.calls.length, 2);
     assert.equal(store.leads.get(sid(7402))?.alertStatus, "sent");

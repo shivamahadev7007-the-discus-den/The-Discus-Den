@@ -7,13 +7,13 @@
  * Errors also carry a friendly { reply, handoff: false } body.
  */
 
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { ANSWERS } from "./answers.ts";
 import type { CatalogLoader } from "./catalog.ts";
-import { isCourtesyOnly, newChatFrom, respond, type ChatState } from "./engine.ts";
+import { newChatFrom, respond, type ChatState } from "./engine.ts";
 import { guardReply } from "./guard.ts";
 import { chatTag, sendChatDigest, sendLeadAlert, type DigestItem, type LeadAlertResult, type LeadForAlert, type TranscriptLine } from "./lead-alert.ts";
-import { type ChatEmailStatus, type ChatRow, type ChatStore } from "./store.ts";
+import { CLAIM_STALE_MS, type ChatEmailStatus, type ChatRow, type ChatStore } from "./store.ts";
 
 export const DEFAULT_ORIGINS = ["https://thediscusden.com", "https://www.thediscusden.com"];
 export const SOURCES = ["insta", "fb", "yt", "site"] as const;
@@ -28,8 +28,9 @@ export const RATE_LIMITS = {
 /**
  * Chat-email flood control defaults (override with env). LB-19: a capped chat is
  * never lost: it is marked 'capped' and listed in the daily digest.
- *   ipPer24h       Visitor emails per IP hash per 24 h (Leads with a valid mobile skip this cap)
- *   globalPerHour  instant emails per hour overall (anti-abuse)
+ *   ipPer24h       Visitor emails per IP hash per 24 h
+ *   globalPerHour  Visitor emails per hour overall (anti-abuse)
+ * LB-19 fix: Leads are never capped and are not counted toward either cap.
  */
 export const ALERT_CAPS = { ipPer24h: 3, globalPerHour: 20 };
 /** LB-19: a chat with no messages for this long has ended. */
@@ -38,6 +39,12 @@ export const CHAT_IDLE_MS = 10 * 60_000;
 export const SWEEP = { batch: 3, budgetMs: 2_500 };
 /** LB-19: daily digest size (the rest follow next day). */
 export const DIGEST_LIMIT = 40;
+/**
+ * LB-19 fix (Kiara #1): the cron emails every chat it ends in the SAME run (each its own
+ * email). Up to `limit` individual sends, `concurrency` at a time, within `budgetMs`;
+ * anything left over (or capped / failed) goes into the digest of that same run.
+ */
+export const CRON_EMAILS = { limit: 40, concurrency: 4, budgetMs: 20_000 };
 
 function envInt(env: Env, key: string, fallback: number): number {
   const raw = env[key];
@@ -228,25 +235,24 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
         const idleMs = envInt(env, "CHAT_IDLE_MINUTES", CHAT_IDLE_MS / 60_000) * 60_000 || CHAT_IDLE_MS;
         let chat = await deps.store.latestChat(sid);
         if (chat && chat.endedAt === null && nowMs - chat.lastMessageAt >= idleMs) {
-          // This visitor's previous chat went idle: end it and email it (alongside the sweep).
-          if (await deps.store.endChat(chat.id, "idle", nowMs)) {
+          // This visitor's previous chat went quiet for 10 min (after a closing message or
+          // not): end it and email it (alongside the sweep).
+          const reason = chat.closedAt !== null ? "closing" : "idle";
+          if (await deps.store.endChat(chat.id, reason, nowMs)) {
             const endedId = chat.id;
-            background.push(emailChat(deps, env, endedId, nowMs, { retryFailed: true, trigger: "idle" }));
+            background.push(emailChat(deps, env, endedId, nowMs, { retryFailed: true, trigger: reason }));
           }
-          chat = { ...chat, endedAt: nowMs, endReason: "idle" };
+          chat = { ...chat, endedAt: nowMs, endReason: reason };
         }
         let engineState: ChatState | null = prevSession;
         if (!chat || chat.endedAt !== null) {
-          // "thanks" / "bye" just after the closing message stays in that chat (no new email).
-          const courtesy = Boolean(chat && chat.endReason === "closing" && nowMs - (chat.endedAt ?? 0) < idleMs && isCourtesyOnly(message));
-          if (!courtesy) {
-            // New chat (first visit, or the last one ended / was emailed): fresh per-chat
-            // state, earlier details carried as `prior`.
-            engineState = newChatFrom(prevSession);
-            chat = await deps.store.startChat({ id: (deps.newId ?? randomUUID)(), sessionId: sid, source, ipHash, nowMs });
-          }
+          // New chat (first visit, or the last one ended): fresh per-chat state, earlier
+          // details carried as `prior`. (Messages within 10 min of the closing message never
+          // get here: that chat is still open, see below.)
+          engineState = newChatFrom(prevSession);
+          chat = await deps.store.startChat({ id: (deps.newId ?? randomUUID)(), sessionId: sid, source, ipHash, nowMs });
         }
-        const chatId = chat!.id;
+        const chatId = chat.id;
 
         // --- Bot brain ---
         const result = await respond(engineState, message, { catalog: deps.catalog });
@@ -270,13 +276,13 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
         ]);
 
         // --- LB-19: one email per chat, always at chat END, with the full transcript ---
-        // (Shiva, 8 Oct 11:37: no instant email when a number is typed.) The bot's closing
-        // message after details are collected ends the chat here; /api/chat/end and the
-        // 10-min idle sweep end the others. LB-7: the send is ALWAYS awaited.
-        if (result.closedNow) {
-          await deps.store.endChat(chatId, "closing", nowMs);
-          await emailChat(deps, env, chatId, nowMs, { retryFailed: true, trigger: "closing" });
-        }
+        // (Shiva, 8 Oct 11:37: no instant email when a number is typed.)
+        // LB-19 fix (Kiara #2): the bot's closing message no longer sends at once. It marks
+        // the chat closed and the chat stays open, so whatever the visitor types in the next
+        // 10 quiet minutes ("thanks", one more question) lands in the SAME chat and the SAME
+        // single email. The email goes when the chat ends: /api/chat/end (widget close /
+        // pagehide), 10 min with no messages (idle sweep / own next message / cron).
+        if (result.closedNow) await deps.store.markChatClosed(chatId, nowMs);
 
         // The sweep never blocks the reply for long: wait out what's left of its budget.
         const all = Promise.allSettled(background);
@@ -378,6 +384,12 @@ export async function sweepIdleChats(deps: ChatDeps, env: Env, nowMs: number, ex
   try {
     const idleMs = envInt(env, "CHAT_IDLE_MINUTES", CHAT_IDLE_MS / 60_000) * 60_000 || CHAT_IDLE_MS;
     const ids = await deps.store.endIdleChats({ cutoffMs: nowMs - idleMs, nowMs, limit: SWEEP.batch, excludeSessionId });
+    // LB-19 fix (Kiara #1): also pick up chats that ended but never got their email
+    // (e.g. the isolate froze between ending and sending): ended 2+ min ago, still pending.
+    if (ids.length < SWEEP.batch) {
+      const orphans = await deps.store.pendingEndedChats({ nowMs, endedBeforeMs: nowMs - CLAIM_STALE_MS, limit: SWEEP.batch - ids.length });
+      for (const id of orphans) if (!ids.includes(id)) ids.push(id);
+    }
     for (const id of ids) await emailChat(deps, env, id, nowMs, { retryFailed: true, trigger: "idle-sweep" });
     return ids.length;
   } catch (err) {
@@ -444,11 +456,15 @@ export async function handleChatEnd(request: Request, deps: ChatDeps): Promise<R
 }
 
 /**
- * LB-19: daily cron (Vercel Hobby: once a day). Ends every idle chat, then sends
- * ONE digest email listing ended chats that never got their email (failed sends,
- * capped, mode off, or ended with no traffic to sweep them), and marks them.
- * If the digest send fails, they stay queued for tomorrow. Protected by
- * CRON_SECRET (Vercel sends "Authorization: Bearer <CRON_SECRET>") when set.
+ * LB-19: daily cron (Vercel Hobby: once a day).
+ *  1. Auth, fail closed: no valid "Authorization: Bearer <CRON_SECRET>" -> 401, and
+ *     CRON_SECRET unset -> 401 too (with a clear error in the logs).
+ *  2. Ends every idle chat (closing-message chats end with reason 'closing').
+ *  3. LB-19 fix (Kiara #1): emails each chat it ended (and any ended chat still waiting
+ *     for its email) individually, in this same run.
+ *  4. ONE digest email listing every ended chat that still has no email (failed send,
+ *     capped Visitor, mode off, over this run's send limit), then marks them. If the
+ *     digest send fails, they stay queued for tomorrow.
  */
 export async function handleChatCron(request: Request, deps: ChatDeps): Promise<Response> {
   const env = deps.env ?? {};
@@ -456,21 +472,46 @@ export async function handleChatCron(request: Request, deps: ChatDeps): Promise<
   const secret = env.CRON_SECRET?.trim();
   const reply = (status: number, body: Record<string, unknown>) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
-  if (secret) {
-    if (request.headers.get("authorization") !== `Bearer ${secret}`) return reply(401, { ok: false });
-  } else {
-    console.warn("[chat] cron: CRON_SECRET is not set; running without auth (digest only ever emails Shiva)");
+  if (!secret) {
+    console.error("[chat] cron: REJECTED (401) because CRON_SECRET is not set. Set CRON_SECRET in Vercel (Production) so the daily chat cron can run.");
+    return reply(401, { ok: false, error: "cron not configured" });
+  }
+  if (!timingSafeEqualStr(request.headers.get("authorization") ?? "", `Bearer ${secret}`)) {
+    console.warn("[chat] cron: rejected (401): missing or wrong Authorization bearer");
+    return reply(401, { ok: false });
   }
   const nowMs = now();
+  const started = Date.now();
   try {
     const idleMs = envInt(env, "CHAT_IDLE_MINUTES", CHAT_IDLE_MS / 60_000) * 60_000 || CHAT_IDLE_MS;
-    let ended = 0;
+    const endedIds: string[] = [];
     for (let i = 0; i < 20; i += 1) {
       const ids = await deps.store.endIdleChats({ cutoffMs: nowMs - idleMs, nowMs, limit: 100, excludeSessionId: null });
-      ended += ids.length;
+      endedIds.push(...ids);
       if (ids.length < 100) break;
     }
-    const candidates = await deps.store.digestCandidates({ nowMs, limit: DIGEST_LIMIT + 1, settleMs: 60_000 });
+    // Individual emails: chats ended now + ended chats still pending (stale claims included).
+    const waiting = await deps.store.pendingEndedChats({ nowMs, endedBeforeMs: nowMs, limit: CRON_EMAILS.limit });
+    const queue = [...new Set([...endedIds, ...waiting])];
+    const toSend = queue.slice(0, CRON_EMAILS.limit);
+    const leftOver = queue.slice(CRON_EMAILS.limit);
+    const results: Record<string, number> = {};
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < toSend.length) {
+        const id = toSend[next++]!;
+        if (Date.now() - started > CRON_EMAILS.budgetMs) {
+          leftOver.push(id);
+          continue;
+        }
+        const st = await emailChat(deps, env, id, nowMs, { retryFailed: true, trigger: "cron" });
+        results[st] = (results[st] ?? 0) + 1;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CRON_EMAILS.concurrency, toSend.length) }, worker));
+    const emailed = results.sent ?? 0;
+
+    const candidates = await deps.store.digestCandidates({ nowMs, limit: DIGEST_LIMIT + 1, settleMs: 60_000, includeIds: leftOver });
     const more = Math.max(0, candidates.length - DIGEST_LIMIT);
     const claimed: Array<{ row: ChatRow; was: ChatRow }> = [];
     for (const was of candidates.slice(0, DIGEST_LIMIT)) {
@@ -478,7 +519,7 @@ export async function handleChatCron(request: Request, deps: ChatDeps): Promise<
       if (row) claimed.push({ row, was });
       else console.log(`[chat] lead alert skipped: claim-miss (digest) chat=${short(was.id)}`);
     }
-    if (!claimed.length) return reply(200, { ok: true, ended, digested: 0 });
+    if (!claimed.length) return reply(200, { ok: true, ended: endedIds.length, emailed, digested: 0 });
 
     const items: DigestItem[] = [];
     for (const { row, was } of claimed) {
@@ -513,11 +554,17 @@ export async function handleChatCron(request: Request, deps: ChatDeps): Promise<
     }
     if (out.sent) console.log(`[chat] chat digest: ${claimed.length} chat(s) emailed${more ? `, ${more}+ left for tomorrow` : ""}`);
     else console.warn(`[chat] lead alert skipped: digest not sent (${out.channel === "off" ? "CHAT_LEAD_ALERT_MODE off" : out.error ?? "failed"}); ${claimed.length} chat(s) stay queued`);
-    return reply(200, { ok: true, ended, digested: out.sent ? claimed.length : 0, queued: out.sent ? more : claimed.length + more });
+    return reply(200, { ok: true, ended: endedIds.length, emailed, digested: out.sent ? claimed.length : 0, queued: out.sent ? more : claimed.length + more });
   } catch (err) {
     console.error("[chat] cron failed", err instanceof Error ? err.message : err);
     return reply(500, { ok: false });
   }
+}
+
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
 }
 
 function emptyState(): ChatState {

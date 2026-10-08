@@ -453,15 +453,61 @@ function finalHeat(state: ChatState): "hot" | "warm" | "browsing" {
 // Handoff field parsers
 // ---------------------------------------------------------------------------
 
-/** Indian mobile: optional +91 / 91 / 0, then 10 digits starting 6–9. Returns +91XXXXXXXXXX. */
+/**
+ * Indian mobile: optional +91 / 91 / 0, then 10 digits starting 6–9. Returns +91XXXXXXXXXX.
+ * LB-19 fix (Kiara #5): works on whole digit runs. A leading "+91" / "91 " / "0 " is a
+ * prefix, never part of the number, so "+91 98765 000" (prefix + 8 digits) is NOT read
+ * as 91 98765 000; it gets the polite recheck instead.
+ */
+const DIGIT_RUN = /(?<![\d+])(?:\+\s*)?\d(?:[\s-]{1,2}\d|\d)*/g;
+function validTen(d: string): string | null {
+  if (!/^[6-9]\d{9}$/.test(d)) return null;
+  if (/^(\d)\1{7,}/.test(d) || /(\d)\1{7,}$/.test(d)) return null;
+  if (d === "9876543210" || d === "6789012345") return null;
+  return `+91${d}`;
+}
+function mobileFromRun(run: string): string | null {
+  const plus = run.trimStart().startsWith("+");
+  const groups = run.replace(/^\s*\+\s*/, "").split(/[\s-]+/).filter(Boolean);
+  const digits = groups.join("");
+  if (plus) return digits.startsWith("91") ? validTen(digits.slice(2)) : null; // +91 only
+  if (groups.length > 1 && ["91", "0", "091"].includes(groups[0]!)) {
+    // "91 98450 12345" / "0 98450 12345": the first group is a prefix.
+    const rest = groups.slice(1);
+    const whole = validTen(rest.join(""));
+    if (whole) return whole;
+    return spanOf(rest);
+  }
+  if (digits.length === 12 && digits.startsWith("91")) return validTen(digits.slice(2));
+  if (digits.length === 11 && digits.startsWith("0")) return validTen(digits.slice(1));
+  const whole = validTen(digits);
+  if (whole) return whole;
+  // Two things typed side by side ("2 9845012345", "9845012345 9845012346"): a whole-group span.
+  return groups.length > 1 ? spanOf(groups) : null;
+}
+function spanOf(groups: string[]): string | null {
+  for (let i = 0; i < groups.length; i += 1) {
+    let d = "";
+    for (let j = i; j < groups.length && d.length < 10; j += 1) {
+      d += groups[j];
+      if (d.length === 10) {
+        const ok = validTen(d);
+        if (ok) return ok;
+      }
+    }
+  }
+  return null;
+}
 export function extractIndianMobile(text: string): string | null {
-  const m = /(?<!\d)(?:\+?\s*91[\s-]*|0)?([6-9](?:[\s-]?\d){9})(?!\d)/.exec(text);
-  if (!m) return null;
-  const digits = m[1]!.replace(/\D/g, "");
-  if (digits.length !== 10) return null;
-  if (/^(\d)\1{7,}/.test(digits) || /(\d)\1{7,}$/.test(digits)) return null;
-  if (digits === "9876543210" || digits === "6789012345") return null;
-  return `+91${digits}`;
+  for (const m of text.matchAll(DIGIT_RUN)) {
+    const phone = mobileFromRun(m[0]);
+    if (phone) return phone;
+  }
+  return null;
+}
+/** Every phone-like digit run (7+ digits) blanked out (for reading the words around a number). */
+function withoutDigitRuns(text: string): string {
+  return text.replace(DIGIT_RUN, (r) => ((r.match(/\d/g) ?? []).length >= 7 ? " , " : r));
 }
 
 function digitCount(text: string): number {
@@ -1123,31 +1169,56 @@ function contactOrPush(state: ChatState): Turn {
 /** After a real-interest answer: append the ask (1st: photos; 2nd, a later interest turn: reserve / stock alert). */
 function maybeAppendAsk(state: ChatState, turn: Turn): Turn {
   if (!INTEREST_INTENT.test(turn.intent)) return turn;
-  if (knownPhone(state) || state.completed || state.handoff.active || state.pendingOffer) return turn;
+  if (knownPhone(state) || state.completed || state.handoff.active || state.pendingOffer === "lookingFor") return turn;
   const a = contactAsk(state);
   if (a.count >= 2 || a.pending) return turn;
   if (a.count === 1 && state.turns - a.lastTurn < 2) return turn;
+  // LB-19 fix (Kiara #4): the ask REPLACES a trailing offer ("Want me to narrow it down by
+  // size or colour?" after a strain list, "Shall I pass your details?" after a visit /
+  // pickup / unlisted-strain answer), so the first strain or visit question gets the
+  // name + WhatsApp ask instead of the old offer, and never two questions at once.
+  // A "yes" to a visit / pickup / unlisted-strain ask still opens the guided handoff (the
+  // LB-9 visit flow), so the 'handoff' offer stays pending; the strain-list 'narrow' offer
+  // is dropped (a "yes" then gets "Please type your name and WhatsApp number here.").
+  let reply = turn.reply;
+  if (state.pendingOffer) {
+    reply = stripOffer(reply.replace(/\n?Want me to narrow it down by size or colou?r\?\s*$/, "")).trim();
+    if (state.pendingOffer === "narrow") state.pendingOffer = null;
+  }
   a.count += 1;
   a.lastTurn = state.turns;
   a.pending = true;
-  return { ...turn, reply: join(turn.reply, a.count === 1 ? ANSWERS.contactAskPhotos : ANSWERS.contactAskReserve) };
+  return { ...turn, reply: join(reply, a.count === 1 ? ANSWERS.contactAskPhotos : ANSWERS.contactAskReserve) };
 }
 
 const CONTACT_FILLER: RegExp[] = [
+  // LB-19 fix (Kiara #6): "You can reach me on ...", "feel free to call me at ...", "drop a message to ..."
+  /\b(?:you|u)\s+(?:can|could|may)\s+(?:also\s+)?(?:reach|call|contact|message|msg|text|ping|whatsapp|wa|find|get|catch)(?:\s+(?:me|us))?(?:\s+(?:on|at|in|via|through))?\b/gi,
+  /\b(?:feel\s+free\s+to|do|please|pls|kindly|just)?\s*(?:call|message|msg|ping|text|reach|contact|whatsapp|wa|drop\s+(?:a\s+)?(?:message|msg|text|hi|line))\s+(?:me|us|to)(?:\s+(?:on|at|in|via|through))?\b/gi,
+  /\b(?:i\s+am|i'm|im)\s+(?:on|reachable\s+(?:on|at)|available\s+(?:on|at))\b/gi,
   /\b(?:my\s+)?(?:whats\s*app|whatsapp|wa|mobile|mob|cell|phone|ph|contact|number|num|no)\b\.?(?:\s*(?:is|:|-|=))?/gi,
-  /\b(?:call|message|msg|ping|text|reach|contact|whatsapp)\s+me(?:\s+(?:on|at))?\b/gi,
   /\b(?:here'?s|here\s+is|please|pls|plz|kindly|thanks?|thank\s+you|ok|okay|sure|yes|hi|hello|hey|vanakkam)\b/gi,
 ];
+/** Words that are never part of a name typed next to a number. */
+const NOT_NAME_WORDS = new Set([
+  "you", "u", "your", "can", "could", "may", "will", "would", "shall", "should", "me", "my", "mine", "us", "our", "we", "it", "is", "are",
+  "was", "on", "at", "in", "via", "to", "reach", "call", "contact", "message", "msg", "text", "ping", "whatsapp", "drop", "send", "find",
+  "get", "catch", "also", "free", "feel", "do", "just", "this", "that", "number", "mobile", "phone", "available", "reachable", "anytime",
+  "any", "time", "evening", "morning", "after", "before", "pm", "am", "only", "or", "best", "same", "below", "above", "he", "him", "she",
+  "they", "them", "if", "need", "want", "interested", "buy", "order", "please", "details", "photos", "videos", "pics",
+]);
 
 /** LB-19: a name typed next to the number ("Ravi 98450 12345", "I'm Ravi, my number is ..."). */
 export function nameNearNumber(raw: string): string | null {
-  let s = raw.replace(/(?<!\d)(?:\+?\s*91[\s-]*|0)?[6-9](?:[\s-]?\d){9}(?!\d)/g, " , ");
+  let s = withoutDigitRuns(raw);
   for (const re of CONTACT_FILLER) s = s.replace(re, " ");
   for (const seg of s.split(/[,;\n]|\band\b|&/i)) {
-    const piece = seg.replace(/\s+/g, " ").trim();
+    const piece = seg.replace(/\s+/g, " ").replace(/^[\s\-–—:.]+|[\s\-–—:]+$/g, "").trim();
     if (piece.length < 2) continue;
     const name = parseName(piece);
-    if (name && name.length >= 2 && !findPlace(norm(name)) && !strainWordsIn(norm(name)).length) return name;
+    if (!name || name.length < 2) continue;
+    if (name.toLowerCase().split(/\s+/).some((w) => NOT_NAME_WORDS.has(w))) continue;
+    if (!findPlace(norm(name)) && !strainWordsIn(norm(name)).length) return name;
   }
   return null;
 }
@@ -1156,10 +1227,13 @@ export function nameNearNumber(raw: string): string | null {
 export function looksLikeBadNumber(raw: string): boolean {
   if (extractIndianMobile(raw)) return false;
   if (/(₹|\brs\.?\s*|\binr\b)\s*\d/i.test(raw)) return false;
-  const runs = raw.match(/\+?\d[\d\s-]{6,18}\d/g) ?? [];
+  const runs = raw.match(/\+?\d[\d\s-]{4,18}\d/g) ?? [];
   return runs.some((r) => {
     const d = r.replace(/\D/g, "");
-    return d.length >= 8 && d.length <= 13 && !/^\d{1,2}[\s-]\d{1,2}[\s-]\d{2,4}$/.test(r.trim());
+    if (/^\d{1,2}[\s-]\d{1,2}[\s-]\d{2,4}$/.test(r.trim())) return false; // a date
+    // "+91 98765 000" / "91 98765 000": a country code with too few digits after it.
+    if (/^\+\s*91|^91[\s-]/.test(r.trim()) && d.length >= 7) return true;
+    return d.length >= 8 && d.length <= 13;
   });
 }
 
@@ -1176,7 +1250,7 @@ function contactAck(state: ChatState): Turn {
   return { reply: ANSWERS.contactNeedName, intent: "contact_saved_need_name" };
 }
 
-/** LB-19: thanks / bye / ok on its own (a courtesy after the closing message stays in that chat). */
+/** LB-19: thanks / bye / ok on its own (kept as a helper; since the fix round every message within 10 min of the closing message stays in that chat). */
 export function isCourtesyOnly(text: string): boolean {
   const t = norm(text);
   if (!t || t.length > 60) return false;
@@ -1220,7 +1294,8 @@ function pleasantryReply(state: ChatState, kind: Pleasantry): Turn {
   state.pendingOffer = null;
   // Bye: just a warm goodbye (a question would read oddly as they leave).
   if (kind === "bye") return { reply: ANSWERS.bye, intent: "bye" };
-  const known = state.askedLookingFor || state.lookingForHint || state.lead.lookingFor || state.handoff.active;
+  // LB-19 fix (Kiara #2): after the closing message (or with the number known), "thanks" is just a thanks.
+  const known = state.askedLookingFor || state.lookingForHint || state.lead.lookingFor || state.handoff.active || state.completed || knownPhone(state);
   const lead = kind === "new" ? ANSWERS.welcomeNewHobbyist : kind === "thanks" ? ANSWERS.youreWelcome : ANSWERS.welcomeGreeting;
   const intent = kind === "new" ? "welcome_new" : kind === "thanks" ? "thanks" : "welcome";
   if (known) {

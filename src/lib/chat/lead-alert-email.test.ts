@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createCatalogLoader, type CatalogLoader } from "./catalog.ts";
 import { newChatState, type ChatState } from "./engine.ts";
-import { handleChatRequest } from "./http.ts";
+import { handleChatEnd, handleChatRequest } from "./http.ts";
 import {
   buildLeadAlertEmail,
   customerEmailFromTranscript,
@@ -71,11 +71,27 @@ function recorder(status = 200) {
   return { calls, fetchImpl };
 }
 
-async function runChat(deps: Parameters<typeof handleChatRequest>[1], msgs: string[], sid = SID) {
+/**
+ * Runs one chat. LB-19 fix (Kiara #2): the email now goes when the chat ENDS (the closing
+ * message keeps the chat open 10 more quiet minutes), so by default the chat is then ended
+ * the way the widget does it: POST /api/chat/end (sendBeacon, text/plain).
+ */
+async function runChat(deps: Parameters<typeof handleChatRequest>[1], msgs: string[], sid = SID, end = true) {
   const out: Array<{ status: number; reply: string; handoff: boolean }> = [];
   for (const message of msgs) {
     const res = await handleChatRequest(post({ message }, sid), deps);
     out.push({ status: res.status, ...((await res.json()) as { reply: string; handoff: boolean }) });
+  }
+  if (end) {
+    const res = await handleChatEnd(
+      new Request("https://thediscusden.com/api/chat/end", {
+        method: "POST",
+        headers: { "content-type": "text/plain;charset=UTF-8", origin: "https://thediscusden.com", "x-forwarded-for": "203.0.113.9" },
+        body: JSON.stringify({ sessionId: sid }),
+      }),
+      deps,
+    );
+    assert.equal(res.status, 204);
   }
   return out;
 }
@@ -228,10 +244,12 @@ describe("LB-4 · /api/chat sends the email once per completed handoff", () => {
     assert.match(body.subject, /^\[Lead\] New chat lead: Ravi — /);
     assert.match(body.text, /Phone\/WhatsApp: \+919845012345/);
     assert.match(body.text, /Visitor: Can I visit the store\?/);
-    // LB-19: sent when the chat ends (the closing message), with the FULL transcript.
+    // LB-19: sent when the chat ends, with the FULL transcript. LB-19 fix (Kiara #2): the
+    // messages after the closing message are in the same chat and the same single email.
     assert.match(body.text, /Visitor: 9845012345/);
     assert.match(body.text, /Visitor: ready now/);
-    assert.match(body.text, /closing message after details were collected/);
+    assert.match(body.text, /Visitor: thanks/);
+    assert.match(body.text, /visitor closed the chat/);
     // Customer never gets their stored details echoed back.
     for (const o of out) assert.doesNotMatch(o.reply, /9845012345/);
   });
@@ -412,7 +430,7 @@ describe("LB-13/14/15 · pushes and pleasantries never email; a genuine handoff 
   });
   it("greetings + pushes with no number -> no email while the chat is open", async () => {
     const { calls, fetchImpl } = recorder();
-    await runChat(deps(fetchImpl), ["hi", "fish", "Connect to Shiva", "no", "put me through", "get me the owner", "thanks"], "3f2b8c1e-9a4d-4e2f-8b6a-00000000b153");
+    await runChat(deps(fetchImpl), ["hi", "fish", "Connect to Shiva", "no", "put me through", "get me the owner", "thanks"], "3f2b8c1e-9a4d-4e2f-8b6a-00000000b153", false);
     assert.equal(calls.length, 0);
   });
   it("after a greeting and 3 pushes, a genuine visit handoff emails exactly once, with the fish-or-food answer", async () => {

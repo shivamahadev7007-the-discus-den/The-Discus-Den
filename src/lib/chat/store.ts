@@ -43,6 +43,8 @@ export type ChatRow = {
   lastMessageAt: number;
   endedAt: number | null;
   endReason: ChatEndReason | null;
+  /** LB-19 fix: when the bot's closing message went out (the chat stays open 10 more quiet minutes). */
+  closedAt: number | null;
   emailStatus: ChatEmailStatus;
   emailKind: ChatEmailKind | null;
   emailVia: "instant" | "digest" | null;
@@ -80,8 +82,13 @@ export type FinishInput = {
   nowMs: number;
 };
 
-/** Caps rule shared by both stores. Leads (valid mobile) skip the per-IP cap: a real lead is never held back by it. */
+/**
+ * Caps rule shared by both stores (LB-19 fix, Kiara #3): a Lead is NEVER capped (neither
+ * the global hourly cap nor the per-IP cap), and only Visitor emails are counted, so Leads
+ * never use up the Visitor allowance either.
+ */
 export function capVerdict(counts: { byIp24h: number; global1h: number }, input: Pick<CapInput, "kind" | "ipHash" | "ipCap" | "globalCap">): CapVerdict {
+  if (input.kind === "lead") return "ok";
   if (counts.global1h >= input.globalCap) return "global_cap";
   if (input.kind === "visitor" && input.ipHash && counts.byIp24h >= input.ipCap) return "ip_cap";
   return "ok";
@@ -121,16 +128,21 @@ export interface ChatStore {
   touchChat(input: { chatId: string; state: ChatState; ipHash: string | null; nowMs: number }): Promise<void>;
   /** Ends an open chat; true only for the call that ended it (idempotent). */
   endChat(chatId: string, reason: ChatEndReason, nowMs: number): Promise<boolean>;
-  /** Ends up to `limit` chats idle since before `cutoffMs` (other sessions only); returns their ids. */
+  /** LB-19 fix: the closing message went out; the chat stays open (ends after 10 quiet min or on /end). */
+  markChatClosed(chatId: string, nowMs: number): Promise<void>;
+  /** Ends up to `limit` chats idle since before `cutoffMs` (other sessions only); returns their ids.
+   *  end_reason = 'closing' if the closing message went out, else 'idle'. */
   endIdleChats(input: { cutoffMs: number; nowMs: number; limit: number; excludeSessionId?: string | null }): Promise<string[]>;
   /** Atomic: pending (or stale claim, or failed when retryFailed) -> claimed. Null = someone else has it / already emailed. */
   claimChatEmail(input: ClaimInput): Promise<ChatRow | null>;
-  /** Anti-abuse caps, counted from chats really emailed instantly. */
+  /** Anti-abuse caps, counted from Visitor chats really emailed instantly (Leads are never capped). */
   chatEmailCaps(input: CapInput): Promise<CapVerdict>;
   /** Final status for a claimed chat (+ an audit row in chat_alerts, + chat_leads.alert_status). */
   finishChatEmail(input: FinishInput): Promise<void>;
-  /** Ended chats never emailed (pending / failed / capped / off / stale claim), oldest first. */
-  digestCandidates(input: { nowMs: number; limit: number; settleMs: number }): Promise<ChatRow[]>;
+  /** Ended chats never emailed (failed / capped / off / stale claim, pending once settled or in includeIds), oldest first. */
+  digestCandidates(input: { nowMs: number; limit: number; settleMs: number; includeIds?: string[] }): Promise<ChatRow[]>;
+  /** Ended chats still waiting for their own email (pending ended before endedBeforeMs, or a stale claim). */
+  pendingEndedChats(input: { nowMs: number; endedBeforeMs: number; limit: number }): Promise<string[]>;
   chatTranscript(chatId: string): Promise<TranscriptLine[]>;
   transcript(sessionId: string): Promise<TranscriptLine[]>;
 }
@@ -151,7 +163,7 @@ function leadHasData(s: ChatState): boolean {
 }
 
 const CHAT_COLS =
-  "id, session_id, source, ip_hash, state, name, phone, city, user_messages, started_at, last_message_at, ended_at, end_reason, email_status, email_kind, email_via, emailed_at, email_note";
+  "id, session_id, source, ip_hash, state, name, phone, city, user_messages, started_at, last_message_at, ended_at, end_reason, closed_at, email_status, email_kind, email_via, emailed_at, email_note";
 
 type DbChat = {
   id: string;
@@ -167,6 +179,7 @@ type DbChat = {
   last_message_at: string | Date;
   ended_at: string | Date | null;
   end_reason: ChatEndReason | null;
+  closed_at: string | Date | null;
   email_status: ChatEmailStatus;
   email_kind: ChatEmailKind | null;
   email_via: "instant" | "digest" | null;
@@ -193,6 +206,7 @@ function rowToChat(r: DbChat): ChatRow {
     lastMessageAt: ms(r.last_message_at)!,
     endedAt: ms(r.ended_at),
     endReason: r.end_reason,
+    closedAt: ms(r.closed_at),
     emailStatus: r.email_status,
     emailKind: r.email_kind,
     emailVia: r.email_via,
@@ -291,7 +305,7 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
 
     async latestChat(sessionId) {
       const sql = await getSql();
-      const rows = await sql.query<DbChat>(`select ${CHAT_COLS} from chat_conversations where session_id = $1 order by started_at desc limit 1`, [sessionId]);
+      const rows = await sql.query<DbChat>(`select ${CHAT_COLS} from chat_conversations where session_id = $1 order by started_at desc, seq desc limit 1`, [sessionId]);
       return rows[0] ? rowToChat(rows[0]) : null;
     },
 
@@ -333,10 +347,18 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
       return rows.length === 1;
     },
 
+    async markChatClosed(chatId, nowMs) {
+      const sql = await getSql();
+      await sql.query("update chat_conversations set closed_at = coalesce(closed_at, $2), updated_at = now() where id = $1 and ended_at is null", [
+        chatId,
+        new Date(nowMs).toISOString(),
+      ]);
+    },
+
     async endIdleChats(input) {
       const sql = await getSql();
       const rows = await sql.query<{ id: string }>(
-        `update chat_conversations set ended_at = $2, end_reason = 'idle', updated_at = now()
+        `update chat_conversations set ended_at = $2, end_reason = case when closed_at is not null then 'closing' else 'idle' end, updated_at = now()
          where id in (
            select id from chat_conversations
            where ended_at is null and last_message_at < $1 and ($4::uuid is null or session_id <> $4::uuid)
@@ -369,8 +391,8 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
       const sql = await getSql();
       const rows = await sql.query<{ by_ip: number; global_1h: number }>(
         `select
-           (select count(*)::int from chat_conversations where $1::text is not null and ip_hash = $1 and id <> $4 and email_status = 'sent' and email_via = 'instant' and emailed_at > $2) as by_ip,
-           (select count(*)::int from chat_conversations where email_status = 'sent' and email_via = 'instant' and emailed_at > $3) as global_1h`,
+           (select count(*)::int from chat_conversations where $1::text is not null and ip_hash = $1 and id <> $4 and email_status = 'sent' and email_via = 'instant' and email_kind = 'visitor' and emailed_at > $2) as by_ip,
+           (select count(*)::int from chat_conversations where email_status = 'sent' and email_via = 'instant' and email_kind = 'visitor' and emailed_at > $3) as global_1h`,
         [input.ipHash, new Date(input.nowMs - 24 * 3600_000).toISOString(), new Date(input.nowMs - 3600_000).toISOString(), input.chatId],
       );
       return capVerdict({ byIp24h: Number(rows[0]?.by_ip ?? 0), global1h: Number(rows[0]?.global_1h ?? 0) }, input);
@@ -398,14 +420,29 @@ export function createSqlChatStore(getSql: () => Promise<SqlLike>): ChatStore {
       const sql = await getSql();
       const rows = await sql.query<DbChat>(
         `select ${CHAT_COLS} from chat_conversations
-         where ended_at is not null and ended_at < $1 and (
-           email_status in ('pending', 'failed', 'capped', 'off')
+         where ended_at is not null and (
+           email_status in ('failed', 'capped', 'off')
+           or (email_status = 'pending' and (ended_at < $1 or id = any($4::uuid[])))
            or (email_status = 'claimed' and email_claimed_at < $2)
          )
-         order by ended_at asc limit $3`,
-        [new Date(input.nowMs - input.settleMs).toISOString(), new Date(input.nowMs - CLAIM_STALE_MS).toISOString(), input.limit],
+         order by ended_at asc, seq asc limit $3`,
+        [new Date(input.nowMs - input.settleMs).toISOString(), new Date(input.nowMs - CLAIM_STALE_MS).toISOString(), input.limit, input.includeIds ?? []],
       );
       return rows.map(rowToChat);
+    },
+
+    async pendingEndedChats(input) {
+      const sql = await getSql();
+      const rows = await sql.query<{ id: string }>(
+        `select id from chat_conversations
+         where ended_at is not null and (
+           (email_status = 'pending' and ended_at <= $1)
+           or (email_status = 'claimed' and email_claimed_at < $2)
+         )
+         order by ended_at asc, seq asc limit $3`,
+        [new Date(input.endedBeforeMs).toISOString(), new Date(input.nowMs - CLAIM_STALE_MS).toISOString(), input.limit],
+      );
+      return rows.map((r) => String(r.id));
     },
 
     async chatTranscript(chatId) {
@@ -506,6 +543,7 @@ export function createMemoryChatStore() {
         lastMessageAt: input.nowMs,
         endedAt: null,
         endReason: null,
+        closedAt: null,
         emailStatus: "pending" as ChatEmailStatus,
         emailKind: null,
         emailVia: null,
@@ -535,6 +573,10 @@ export function createMemoryChatStore() {
       c.endReason = reason;
       return true;
     },
+    async markChatClosed(chatId, nowMs) {
+      const c = chats.get(chatId);
+      if (c && c.endedAt === null) c.closedAt ??= nowMs;
+    },
     async endIdleChats(input) {
       const idle = [...chats.values()]
         .filter((c) => c.endedAt === null && c.lastMessageAt < input.cutoffMs && c.sessionId !== input.excludeSessionId)
@@ -542,7 +584,7 @@ export function createMemoryChatStore() {
         .slice(0, input.limit);
       for (const c of idle) {
         c.endedAt = input.nowMs;
-        c.endReason = "idle";
+        c.endReason = c.closedAt !== null ? "closing" : "idle";
       }
       return idle.map((c) => c.id);
     },
@@ -561,7 +603,7 @@ export function createMemoryChatStore() {
       return copy(c);
     },
     async chatEmailCaps(input) {
-      const sent = [...chats.values()].filter((c) => c.emailStatus === "sent" && c.emailVia === "instant" && c.emailedAt !== null);
+      const sent = [...chats.values()].filter((c) => c.emailStatus === "sent" && c.emailVia === "instant" && c.emailKind === "visitor" && c.emailedAt !== null);
       return capVerdict(
         {
           byIp24h: input.ipHash ? sent.filter((c) => c.id !== input.chatId && c.ipHash === input.ipHash && c.emailedAt! > input.nowMs - 24 * 3600_000).length : 0,
@@ -593,12 +635,24 @@ export function createMemoryChatStore() {
         .filter(
           (c) =>
             c.endedAt !== null &&
-            c.endedAt < input.nowMs - input.settleMs &&
-            (["pending", "failed", "capped", "off"].includes(c.emailStatus) || (c.emailStatus === "claimed" && (c.claimedAt ?? 0) < input.nowMs - CLAIM_STALE_MS)),
+            (["failed", "capped", "off"].includes(c.emailStatus) ||
+              (c.emailStatus === "pending" && (c.endedAt < input.nowMs - input.settleMs || (input.includeIds ?? []).includes(c.id))) ||
+              (c.emailStatus === "claimed" && (c.claimedAt ?? 0) < input.nowMs - CLAIM_STALE_MS)),
         )
         .sort((a, b) => a.endedAt! - b.endedAt!)
         .slice(0, input.limit)
         .map(copy);
+    },
+    async pendingEndedChats(input) {
+      return [...chats.values()]
+        .filter(
+          (c) =>
+            c.endedAt !== null &&
+            ((c.emailStatus === "pending" && c.endedAt <= input.endedBeforeMs) || (c.emailStatus === "claimed" && (c.claimedAt ?? 0) < input.nowMs - CLAIM_STALE_MS)),
+        )
+        .sort((a, b) => a.endedAt! - b.endedAt!)
+        .slice(0, input.limit)
+        .map((c) => c.id);
     },
     async chatTranscript(chatId) {
       return messages.filter((m) => m.chatId === chatId).map((m) => ({ role: m.role, text: m.text }));
