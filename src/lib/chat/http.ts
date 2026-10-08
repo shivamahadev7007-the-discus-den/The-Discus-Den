@@ -7,13 +7,13 @@
  * Errors also carry a friendly { reply, handoff: false } body.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ANSWERS } from "./answers.ts";
 import type { CatalogLoader } from "./catalog.ts";
-import { respond } from "./engine.ts";
+import { isCourtesyOnly, newChatFrom, respond, type ChatState } from "./engine.ts";
 import { guardReply } from "./guard.ts";
-import { sendLeadAlert, type LeadAlertResult, type LeadForAlert, type TranscriptLine } from "./lead-alert.ts";
-import type { ChatStore } from "./store.ts";
+import { chatTag, sendChatDigest, sendLeadAlert, type DigestItem, type LeadAlertResult, type LeadForAlert, type TranscriptLine } from "./lead-alert.ts";
+import { type ChatEmailStatus, type ChatRow, type ChatStore } from "./store.ts";
 
 export const DEFAULT_ORIGINS = ["https://thediscusden.com", "https://www.thediscusden.com"];
 export const SOURCES = ["insta", "fb", "yt", "site"] as const;
@@ -25,8 +25,19 @@ export const RATE_LIMITS = {
   session: { limit: 20, windowSeconds: 5 * 60 },
   ip: { limit: 60, windowSeconds: 10 * 60 },
 };
-/** Lead-alert flood control defaults (override with env). */
-export const ALERT_CAPS = { ipPer24h: 2, globalPerHour: 20 };
+/**
+ * Chat-email flood control defaults (override with env). LB-19: a capped chat is
+ * never lost: it is marked 'capped' and listed in the daily digest.
+ *   ipPer24h       Visitor emails per IP hash per 24 h (Leads with a valid mobile skip this cap)
+ *   globalPerHour  instant emails per hour overall (anti-abuse)
+ */
+export const ALERT_CAPS = { ipPer24h: 3, globalPerHour: 20 };
+/** LB-19: a chat with no messages for this long has ended. */
+export const CHAT_IDLE_MS = 10 * 60_000;
+/** LB-19: opportunistic idle sweep on each /api/chat request: small batch, short budget. */
+export const SWEEP = { batch: 3, budgetMs: 2_500 };
+/** LB-19: daily digest size (the rest follow next day). */
+export const DIGEST_LIMIT = 40;
 
 function envInt(env: Env, key: string, fallback: number): number {
   const raw = env[key];
@@ -48,7 +59,15 @@ export type ChatDeps = {
   env?: Env;
   now?: () => number;
   sendAlert?: (lead: LeadForAlert, transcript: TranscriptLine[]) => Promise<LeadAlertResult>;
-  /** @deprecated LB-7 5 Oct: lead alerts are always awaited; kept for test API compat, ignored. */
+  /** LB-19: daily digest sender (default: sendChatDigest via Resend). */
+  sendDigest?: (items: DigestItem[], more: number) => Promise<LeadAlertResult>;
+  /** LB-19: chat id generator (tests). */
+  newId?: () => string;
+  /**
+   * LB-7: the visitor's own lead email is always awaited, never handed to waitUntil.
+   * LB-19: only an idle-sweep batch that outlives its short budget is handed here as
+   * a best effort; correctness never depends on it (stale claims are retried).
+   */
   waitUntil?: (p: Promise<unknown>) => void;
 };
 
@@ -200,9 +219,37 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
           return json(429, { reply: ANSWERS.rateLimited, handoff: false }, { ...cors, "Retry-After": String(retry) });
         }
 
+        // --- LB-19: idle sweep of OTHER sessions' chats, in parallel, bounded ---
+        const sweepStarted = Date.now();
+        const background: Array<Promise<unknown>> = [sweepIdleChats(deps, env, nowMs, sid)];
+
+        // --- LB-19: which chat does this message belong to? ---
+        const prevSession = await deps.store.loadSession(sid);
+        const idleMs = envInt(env, "CHAT_IDLE_MINUTES", CHAT_IDLE_MS / 60_000) * 60_000 || CHAT_IDLE_MS;
+        let chat = await deps.store.latestChat(sid);
+        if (chat && chat.endedAt === null && nowMs - chat.lastMessageAt >= idleMs) {
+          // This visitor's previous chat went idle: end it and email it (alongside the sweep).
+          if (await deps.store.endChat(chat.id, "idle", nowMs)) {
+            const endedId = chat.id;
+            background.push(emailChat(deps, env, endedId, nowMs, { retryFailed: true, trigger: "idle" }));
+          }
+          chat = { ...chat, endedAt: nowMs, endReason: "idle" };
+        }
+        let engineState: ChatState | null = prevSession;
+        if (!chat || chat.endedAt !== null) {
+          // "thanks" / "bye" just after the closing message stays in that chat (no new email).
+          const courtesy = Boolean(chat && chat.endReason === "closing" && nowMs - (chat.endedAt ?? 0) < idleMs && isCourtesyOnly(message));
+          if (!courtesy) {
+            // New chat (first visit, or the last one ended / was emailed): fresh per-chat
+            // state, earlier details carried as `prior`.
+            engineState = newChatFrom(prevSession);
+            chat = await deps.store.startChat({ id: (deps.newId ?? randomUUID)(), sessionId: sid, source, ipHash, nowMs });
+          }
+        }
+        const chatId = chat!.id;
+
         // --- Bot brain ---
-        const prev = await deps.store.loadSession(sid);
-        const result = await respond(prev, message, { catalog: deps.catalog });
+        const result = await respond(engineState, message, { catalog: deps.catalog });
         const guarded = guardReply(result.reply);
         if (guarded.blocked.length || guarded.stripped) {
           console.warn(`[chat] output guard: blocked=${guarded.blocked.join(",") || "-"} stripped=${guarded.stripped} intent=${result.intent}`);
@@ -215,57 +262,34 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
         await Promise.all([
           deps.store.saveSession(sid, source, ipHash, result.state),
           deps.store.appendMessages([
-            { sessionId: sid, role: "user", text: message, source, ipHash, intent: result.intent },
-            { sessionId: sid, role: "bot", text: reply, source, ipHash, intent: result.intent },
+            { sessionId: sid, chatId, role: "user", text: message, source, ipHash, intent: result.intent },
+            { sessionId: sid, chatId, role: "bot", text: reply, source, ipHash, intent: result.intent },
           ]),
           deps.store.upsertLead(sid, source, result.state),
+          deps.store.touchChat({ chatId, state: result.state, ipHash, nowMs }),
         ]);
 
-        // --- Lead alert: once per session, then flood control ---
-        // LB-7: fire as soon as the lead is actionable (name + valid number captured), not
-        // only after the last handoff question; visitors often stop replying after the number.
-        const hasContact = (s: { lead?: { name?: string; phone?: string } } | null | undefined) =>
-          Boolean(s?.lead?.name && s?.lead?.phone);
-        const contactReadyNow = hasContact(result.state) && !hasContact(prev);
-        if ((result.completedNow || contactReadyNow) && (await deps.store.claimLeadAlert(sid))) {
-          const status = await deps.store.decideLeadAlert({
-            sessionId: sid,
-            phone: result.state.lead.phone ?? null,
-            ipHash,
-            ipCap: envInt(env, "CHAT_ALERT_IP_CAP_24H", ALERT_CAPS.ipPer24h),
-            globalCap: envInt(env, "CHAT_ALERT_GLOBAL_CAP_HOUR", ALERT_CAPS.globalPerHour),
-            nowMs,
-          });
-          if (status !== "sent") {
-            console.warn(`[chat] lead alert ${status} (lead stored in DB)`);
-          } else {
-            const send = deps.sendAlert ?? ((l, t) => sendLeadAlert(l, t, env));
-            // LB-7 (5 Oct): ALWAYS await the send. waitUntil was fire-and-forget: Vercel can
-            // freeze the isolate after the response, so Resend never ran and recordAlertOutcome
-            // never rewrote the optimistic 'sent' row. Those phantom 'sent' rows then hit the
-            // per-phone (1/24h) and per-IP (2/24h) caps and suppressed every later real lead
-            // (Shiva got Juniper's one test email and nothing after). sendLeadAlert already
-            // times out at 5 s, so awaiting keeps the chat reply honest without hanging.
-            try {
-              const transcript = await deps.store.transcript(sid);
-              const out = await send({ sessionId: sid, source, state: result.state }, transcript);
-              if (out && out.sent) {
-                await deps.store.confirmLeadAlertSent({
-                  sessionId: sid,
-                  phone: result.state.lead.phone ?? null,
-                  ipHash,
-                  nowMs,
-                });
-              } else {
-                // LB-7: only alerts that really went out count toward the caps.
-                await deps.store.recordAlertOutcome(sid, out?.channel === "off" ? "not_sent_off" : "failed");
-              }
-            } catch (err) {
-              console.warn("[chat] lead alert failed (soft)", err instanceof Error ? err.message : err);
-              await deps.store.recordAlertOutcome(sid, "failed").catch(() => undefined);
-            }
-          }
+        // --- LB-19: one email per chat, always at chat END, with the full transcript ---
+        // (Shiva, 8 Oct 11:37: no instant email when a number is typed.) The bot's closing
+        // message after details are collected ends the chat here; /api/chat/end and the
+        // 10-min idle sweep end the others. LB-7: the send is ALWAYS awaited.
+        if (result.closedNow) {
+          await deps.store.endChat(chatId, "closing", nowMs);
+          await emailChat(deps, env, chatId, nowMs, { retryFailed: true, trigger: "closing" });
         }
+
+        // The sweep never blocks the reply for long: wait out what's left of its budget.
+        const all = Promise.allSettled(background);
+        const left = SWEEP.budgetMs - (Date.now() - sweepStarted);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const finished = await Promise.race([
+          all.then(() => true),
+          new Promise<boolean>((r) => {
+            timer = setTimeout(() => r(false), Math.max(0, left));
+          }),
+        ]);
+        clearTimeout(timer);
+        if (!finished) (deps.waitUntil ?? platformWaitUntil())?.(all);
 
         return json(200, { reply, handoff: result.handoff }, cors);
       })(),
@@ -275,4 +299,227 @@ export async function handleChatRequest(request: Request, deps: ChatDeps): Promi
     console.error("[chat] request failed", err instanceof Error ? err.message : err);
     return json(503, { reply: ANSWERS.serverError, handoff: false }, cors);
   }
+}
+
+function chatMeta(c: ChatRow) {
+  return { id: c.id, startedAt: c.startedAt, lastMessageAt: c.lastMessageAt, endedAt: c.endedAt, endReason: c.endReason };
+}
+
+function short(id: string): string {
+  return id.slice(0, 8);
+}
+
+/**
+ * LB-19: send THE email for one chat. Claim first (atomic; only one caller wins),
+ * then caps, then Resend. Only a Resend OK marks the chat 'sent'. A failure /
+ * mode off / cap releases it as failed / off / capped so the daily digest picks
+ * it up. Every skip is logged: "[chat] lead alert skipped: <reason>". Never throws.
+ */
+export async function emailChat(
+  deps: ChatDeps,
+  env: Env,
+  chatId: string,
+  nowMs: number,
+  opts: { retryFailed: boolean; trigger: string },
+): Promise<ChatEmailStatus | "skipped"> {
+  let claimed: ChatRow | null = null;
+  try {
+    claimed = await deps.store.claimChatEmail({ chatId, nowMs, retryFailed: opts.retryFailed });
+    if (!claimed) {
+      const cur = await deps.store.getChat(chatId).catch(() => null);
+      console.log(`[chat] lead alert skipped: claim-miss (${cur ? `chat already ${cur.emailStatus}` : "no such chat"}) chat=${short(chatId)} trigger=${opts.trigger}`);
+      return "skipped";
+    }
+    const state = claimed.state;
+    const kind = state && chatTag(state).tag === "Lead" ? "lead" : "visitor";
+    const base = { chatId, sessionId: claimed.sessionId, kind, phone: state?.lead.phone ?? null, ipHash: claimed.ipHash, nowMs } as const;
+    if (!state) {
+      await deps.store.finishChatEmail({ ...base, status: "failed", via: "instant", note: "empty chat" });
+      console.warn(`[chat] lead alert skipped: empty chat (no saved state) chat=${short(chatId)} (kept for the daily digest)`);
+      return "failed";
+    }
+    const cap = await deps.store.chatEmailCaps({
+      chatId,
+      kind,
+      ipHash: claimed.ipHash,
+      ipCap: envInt(env, "CHAT_ALERT_IP_CAP_24H", ALERT_CAPS.ipPer24h),
+      globalCap: envInt(env, "CHAT_ALERT_GLOBAL_CAP_HOUR", ALERT_CAPS.globalPerHour),
+      nowMs,
+    });
+    if (cap !== "ok") {
+      await deps.store.finishChatEmail({ ...base, status: "capped", via: "instant", note: cap });
+      console.warn(`[chat] lead alert skipped: ${cap} chat=${short(chatId)} kind=${kind} (kept for the daily digest)`);
+      return "capped";
+    }
+    const transcript = await deps.store.chatTranscript(chatId);
+    const send = deps.sendAlert ?? ((l, t) => sendLeadAlert(l, t, env));
+    const out = await send({ sessionId: claimed.sessionId, source: claimed.source, state, chat: chatMeta(claimed) }, transcript);
+    if (out && out.sent) {
+      await deps.store.finishChatEmail({ ...base, status: "sent", via: "instant", note: null });
+      return "sent";
+    }
+    const status = out?.channel === "off" ? "off" : "failed";
+    await deps.store.finishChatEmail({ ...base, status, via: "instant", note: out?.error ?? null });
+    console.warn(`[chat] lead alert skipped: ${status === "off" ? "CHAT_LEAD_ALERT_MODE off" : `send failed (${out?.error ?? "unknown"})`} chat=${short(chatId)} kind=${kind} (kept for the daily digest)`);
+    return status;
+  } catch (err) {
+    console.warn(`[chat] lead alert skipped: error (${err instanceof Error ? err.message : String(err)}) chat=${short(chatId)} (kept for the daily digest)`);
+    if (claimed) {
+      await deps.store
+        .finishChatEmail({ chatId, sessionId: claimed.sessionId, kind: claimed.state && chatTag(claimed.state).tag === "Lead" ? "lead" : "visitor", phone: claimed.state?.lead.phone ?? null, ipHash: claimed.ipHash, nowMs, status: "failed", via: "instant", note: "error" })
+        .catch(() => undefined);
+    }
+    return "failed";
+  }
+}
+
+/** LB-19: end a few idle chats of other sessions and email them. Never throws. */
+export async function sweepIdleChats(deps: ChatDeps, env: Env, nowMs: number, excludeSessionId: string | null): Promise<number> {
+  try {
+    const idleMs = envInt(env, "CHAT_IDLE_MINUTES", CHAT_IDLE_MS / 60_000) * 60_000 || CHAT_IDLE_MS;
+    const ids = await deps.store.endIdleChats({ cutoffMs: nowMs - idleMs, nowMs, limit: SWEEP.batch, excludeSessionId });
+    for (const id of ids) await emailChat(deps, env, id, nowMs, { retryFailed: true, trigger: "idle-sweep" });
+    return ids.length;
+  } catch (err) {
+    console.warn("[chat] idle sweep failed (soft)", err instanceof Error ? err.message : err);
+    return 0;
+  }
+}
+
+function noContent(headers: Record<string, string> = {}): Response {
+  return new Response(null, { status: 204, headers: { "Cache-Control": "no-store", ...headers } });
+}
+
+/**
+ * LB-19: POST /api/chat/end { sessionId } — the widget calls it with
+ * navigator.sendBeacon on close / pagehide (text/plain or application/json body).
+ * Ends the session's open chat and sends its email if none went yet. Idempotent:
+ * a second call finds the chat ended/emailed and does nothing. Always 204 on a
+ * valid body (sendBeacon ignores the response anyway).
+ */
+export async function handleChatEnd(request: Request, deps: ChatDeps): Promise<Response> {
+  const env = deps.env ?? {};
+  const now = deps.now ?? Date.now;
+  const method = request.method.toUpperCase();
+  if (method === "OPTIONS") return handleOptions(request, env);
+  const cors = corsHeaders(request.headers.get("origin"), env);
+  if (cors === null) return new Response(null, { status: 403, headers: { Vary: "Origin" } });
+  if (method !== "POST") return new Response(null, { status: 405, headers: { ...cors, Allow: "POST, OPTIONS" } });
+
+  let sessionId = "";
+  try {
+    const text = await request.text();
+    if (text.length > MAX_BODY_BYTES) return new Response(null, { status: 413, headers: cors });
+    const body = JSON.parse(text) as { sessionId?: unknown };
+    sessionId = typeof body?.sessionId === "string" ? body.sessionId.trim() : "";
+  } catch {
+    sessionId = "";
+  }
+  if (!UUID_RE.test(sessionId)) return new Response(null, { status: 400, headers: cors });
+  const sid = sessionId.toLowerCase();
+
+  try {
+    return await withTimeout(
+      (async () => {
+        const nowMs = now();
+        const ipHash = hashIp(clientIp(request), env);
+        if (ipHash && (await deps.store.hitRateLimit(`end:${ipHash}`, RATE_LIMITS.ip.windowSeconds, nowMs)) > RATE_LIMITS.ip.limit) {
+          return new Response(null, { status: 429, headers: { ...cors, "Retry-After": String(RATE_LIMITS.ip.windowSeconds) } });
+        }
+        const chat = await deps.store.latestChat(sid);
+        if (!chat) return noContent(cors);
+        if (chat.endedAt === null) await deps.store.endChat(chat.id, "beacon", nowMs);
+        // pending / failed / a claim that may be stale (the store decides): try to send.
+        if (chat.emailStatus === "pending" || chat.emailStatus === "failed" || chat.emailStatus === "claimed") {
+          await emailChat(deps, env, chat.id, nowMs, { retryFailed: true, trigger: "end" });
+        }
+        return noContent(cors);
+      })(),
+      TIME_BUDGET_MS,
+    );
+  } catch (err) {
+    console.error("[chat] /end failed", err instanceof Error ? err.message : err);
+    return new Response(null, { status: 503, headers: cors });
+  }
+}
+
+/**
+ * LB-19: daily cron (Vercel Hobby: once a day). Ends every idle chat, then sends
+ * ONE digest email listing ended chats that never got their email (failed sends,
+ * capped, mode off, or ended with no traffic to sweep them), and marks them.
+ * If the digest send fails, they stay queued for tomorrow. Protected by
+ * CRON_SECRET (Vercel sends "Authorization: Bearer <CRON_SECRET>") when set.
+ */
+export async function handleChatCron(request: Request, deps: ChatDeps): Promise<Response> {
+  const env = deps.env ?? {};
+  const now = deps.now ?? Date.now;
+  const secret = env.CRON_SECRET?.trim();
+  const reply = (status: number, body: Record<string, unknown>) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
+  if (secret) {
+    if (request.headers.get("authorization") !== `Bearer ${secret}`) return reply(401, { ok: false });
+  } else {
+    console.warn("[chat] cron: CRON_SECRET is not set; running without auth (digest only ever emails Shiva)");
+  }
+  const nowMs = now();
+  try {
+    const idleMs = envInt(env, "CHAT_IDLE_MINUTES", CHAT_IDLE_MS / 60_000) * 60_000 || CHAT_IDLE_MS;
+    let ended = 0;
+    for (let i = 0; i < 20; i += 1) {
+      const ids = await deps.store.endIdleChats({ cutoffMs: nowMs - idleMs, nowMs, limit: 100, excludeSessionId: null });
+      ended += ids.length;
+      if (ids.length < 100) break;
+    }
+    const candidates = await deps.store.digestCandidates({ nowMs, limit: DIGEST_LIMIT + 1, settleMs: 60_000 });
+    const more = Math.max(0, candidates.length - DIGEST_LIMIT);
+    const claimed: Array<{ row: ChatRow; was: ChatRow }> = [];
+    for (const was of candidates.slice(0, DIGEST_LIMIT)) {
+      const row = await deps.store.claimChatEmail({ chatId: was.id, nowMs, retryFailed: true, digest: true });
+      if (row) claimed.push({ row, was });
+      else console.log(`[chat] lead alert skipped: claim-miss (digest) chat=${short(was.id)}`);
+    }
+    if (!claimed.length) return reply(200, { ok: true, ended, digested: 0 });
+
+    const items: DigestItem[] = [];
+    for (const { row, was } of claimed) {
+      items.push({
+        lead: { sessionId: row.sessionId, source: row.source, state: row.state ?? emptyState(), chat: chatMeta(row) },
+        transcript: await deps.store.chatTranscript(row.id),
+        status: was.emailStatus,
+        note: was.emailNote,
+      });
+    }
+    const send = deps.sendDigest ?? ((it, m) => sendChatDigest(it, env, undefined, m));
+    let out: LeadAlertResult;
+    try {
+      out = await send(items, more);
+    } catch (err) {
+      out = { sent: false, channel: "email", error: err instanceof Error ? err.message : String(err) };
+    }
+    for (const { row, was } of claimed) {
+      const kind = row.state && chatTag(row.state).tag === "Lead" ? "lead" : "visitor";
+      const status: ChatEmailStatus = out.sent ? "sent" : out.channel === "off" ? "off" : was.emailStatus === "capped" ? "capped" : "failed";
+      await deps.store.finishChatEmail({
+        chatId: row.id,
+        sessionId: row.sessionId,
+        kind,
+        phone: row.state?.lead.phone ?? null,
+        ipHash: row.ipHash,
+        nowMs,
+        status: status as Exclude<ChatEmailStatus, "pending" | "claimed">,
+        via: "digest",
+        note: out.sent ? "digest" : out.error ?? was.emailNote,
+      });
+    }
+    if (out.sent) console.log(`[chat] chat digest: ${claimed.length} chat(s) emailed${more ? `, ${more}+ left for tomorrow` : ""}`);
+    else console.warn(`[chat] lead alert skipped: digest not sent (${out.channel === "off" ? "CHAT_LEAD_ALERT_MODE off" : out.error ?? "failed"}); ${claimed.length} chat(s) stay queued`);
+    return reply(200, { ok: true, ended, digested: out.sent ? claimed.length : 0, queued: out.sent ? more : claimed.length + more });
+  } catch (err) {
+    console.error("[chat] cron failed", err instanceof Error ? err.message : err);
+    return reply(500, { ok: false });
+  }
+}
+
+function emptyState(): ChatState {
+  return newChatFrom(null);
 }

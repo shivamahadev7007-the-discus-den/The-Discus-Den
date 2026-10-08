@@ -44,6 +44,12 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.beginnerIntro, "FAQ 3"],
   [ANSWERS.faqStrains, "FAQ 1"],
   [ANSWERS.noInternalFigures, "internal"],
+  // LB-19: name + WhatsApp capture.
+  [ANSWERS.contactAskTalk, "LB-19 ask"],
+  [ANSWERS.contactAskTalk2, "LB-19 ask"],
+  [ANSWERS.contactAskYes, "LB-19 ask"],
+  [ANSWERS.contactNeedName, "LB-19 contact saved"],
+  [ANSWERS.phoneInvalid, "LB-19 recheck number"],
   [ANSWERS.humanPush, "LB-6 steer"],
   [ANSWERS.humanPushShort, "LB-6 steer"],
   [ANSWERS.welcomeGreeting, "welcome"],

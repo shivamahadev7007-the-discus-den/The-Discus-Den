@@ -175,6 +175,14 @@ export default defineConfig(({ command, isPreview }) => ({
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
+            // LB-19: daily chat safety net (Vercel Hobby allows one run a day).
+            // 03:30 UTC = 09:00 IST. Merged into .vercel/output/config.json; the
+            // same entry is in vercel.json. Set CRON_SECRET in Vercel to protect it.
+            vercel: {
+              config: {
+                crons: [{ path: "/api/chat/cron", schedule: "30 3 * * *" }],
+              },
+            },
           }),
         ]
       : []),

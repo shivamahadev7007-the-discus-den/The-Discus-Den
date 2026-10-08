@@ -94,6 +94,19 @@ export type ChatState = {
   lookingForHint?: string;
   /** LB-13: the fish-or-food question was already asked after a pleasantry this session. */
   askedLookingFor?: boolean;
+  /**
+   * LB-19: name + WhatsApp asks in this chat (max 2). `pending` = the last bot reply
+   * asked; `awaitingName` = a number came without a name.
+   */
+  contactAsk?: { count: number; lastTurn: number; pending: boolean; declined: boolean; awaitingName?: boolean };
+  /** LB-19: details from an earlier chat on this browser session (sessionIds live forever). */
+  prior?: { name?: string; phone?: string; city?: string };
+  /** LB-19: numbers typed this chat that failed the 10-digit mobile check. */
+  badNumbers?: number;
+  /** LB-19: LB-15 polite replies given this chat (rotation index). */
+  pushFirms?: number;
+  /** LB-19: a push was already told "I've passed your details" this chat. */
+  toldPassed?: boolean;
 };
 
 export function newChatState(): ChatState {
@@ -118,7 +131,27 @@ export type EngineResult = {
   intent: string;
   /** True only on the turn the lead becomes complete (name + valid number). */
   completedNow: boolean;
+  /** LB-19: a valid Indian mobile was captured on this turn (saved; the email still waits for chat end). */
+  phoneCapturedNow: boolean;
+  /** LB-19: this reply is the closing message after details were collected (the chat ends). */
+  closedNow: boolean;
 };
+
+/**
+ * LB-19: a fresh engine state for a NEW chat on an existing browser session.
+ * Per-chat counters (asks, pushes, handoff) reset; known details are carried as
+ * `prior` (shown in the email, and the bot doesn't ask for a number it already has).
+ */
+export function newChatFrom(prev: ChatState | null | undefined): ChatState {
+  const fresh = newChatState();
+  if (!prev || prev.v !== 1) return fresh;
+  const name = prev.lead?.name ?? prev.prior?.name;
+  const phone = prev.lead?.phone ?? prev.prior?.phone;
+  const city = prev.lead?.city ?? prev.prior?.city;
+  if (name || phone || city) fresh.prior = { ...(name ? { name } : {}), ...(phone ? { phone } : {}), ...(city ? { city } : {}) };
+  if (prev.tags?.history) fresh.tags.history = prev.tags.history;
+  return fresh;
+}
 
 // ---------------------------------------------------------------------------
 // Text helpers
@@ -1045,11 +1078,111 @@ export function isReachAsk(t: string): boolean {
  * polite "Understood. Kindly place your requirement..." reply, 4th+ = rotate its variants.
  * Never the same reply twice in a row; never a handoff.
  */
-function pushReply(state: ChatState): string {
-  const n = (state.humanPushes = (state.humanPushes ?? 0) + 1);
-  if (n === 1) return ANSWERS.humanPush;
-  if (n === 2) return ANSWERS.humanPushShort;
-  return firmPushReply(n - 3);
+// ---------------------------------------------------------------------------
+// LB-19: name + WhatsApp capture (persuasion). Max 2 asks per chat, never pushy.
+// ---------------------------------------------------------------------------
+
+/** Intents that count as a real-interest question: price, strain, delivery, visit. */
+const INTEREST_INTENT =
+  /^(?:(?:price|available|strain|stock)_(?!fallback$)\w+|ship_(?:general|in_states|cost|how)|delivery_timing\w*|visit|pickup|station_pickup|per_piece)$/;
+
+function contactAsk(state: ChatState): NonNullable<ChatState["contactAsk"]> {
+  return (state.contactAsk ??= { count: 0, lastTurn: 0, pending: false, declined: false });
+}
+
+function knownPhone(state: ChatState): boolean {
+  return Boolean(state.lead.phone || state.prior?.phone);
+}
+
+/**
+ * LB-19: "talk / connect to Shiva". No number yet -> the name + WhatsApp ask
+ * (up to the 2 asks). After a decline or both asks, the LB-15 polite line
+ * (rotated, never identical twice in a row). Number already known -> it's passed.
+ */
+function contactOrPush(state: ChatState): Turn {
+  // humanPushes counts every push in the chat (asks included); pushFirms counts LB-15 replies.
+  state.humanPushes = (state.humanPushes ?? 0) + 1;
+  const firm = (): string => firmPushReply((state.pushFirms = (state.pushFirms ?? 0) + 1) - 1);
+  if (knownPhone(state)) {
+    if (!state.toldPassed) {
+      state.toldPassed = true;
+      return { reply: ANSWERS.handoffAlreadyDone, intent: "human_push" };
+    }
+    return { reply: firm(), intent: "human_push" };
+  }
+  const a = contactAsk(state);
+  if (!a.declined && a.count < 2) {
+    a.count += 1;
+    a.lastTurn = state.turns;
+    a.pending = true;
+    return { reply: a.count === 1 ? ANSWERS.contactAskTalk : ANSWERS.contactAskTalk2, intent: "human_push" };
+  }
+  return { reply: firm(), intent: "human_push" };
+}
+
+/** After a real-interest answer: append the ask (1st: photos; 2nd, a later interest turn: reserve / stock alert). */
+function maybeAppendAsk(state: ChatState, turn: Turn): Turn {
+  if (!INTEREST_INTENT.test(turn.intent)) return turn;
+  if (knownPhone(state) || state.completed || state.handoff.active || state.pendingOffer) return turn;
+  const a = contactAsk(state);
+  if (a.count >= 2 || a.pending) return turn;
+  if (a.count === 1 && state.turns - a.lastTurn < 2) return turn;
+  a.count += 1;
+  a.lastTurn = state.turns;
+  a.pending = true;
+  return { ...turn, reply: join(turn.reply, a.count === 1 ? ANSWERS.contactAskPhotos : ANSWERS.contactAskReserve) };
+}
+
+const CONTACT_FILLER: RegExp[] = [
+  /\b(?:my\s+)?(?:whats\s*app|whatsapp|wa|mobile|mob|cell|phone|ph|contact|number|num|no)\b\.?(?:\s*(?:is|:|-|=))?/gi,
+  /\b(?:call|message|msg|ping|text|reach|contact|whatsapp)\s+me(?:\s+(?:on|at))?\b/gi,
+  /\b(?:here'?s|here\s+is|please|pls|plz|kindly|thanks?|thank\s+you|ok|okay|sure|yes|hi|hello|hey|vanakkam)\b/gi,
+];
+
+/** LB-19: a name typed next to the number ("Ravi 98450 12345", "I'm Ravi, my number is ..."). */
+export function nameNearNumber(raw: string): string | null {
+  let s = raw.replace(/(?<!\d)(?:\+?\s*91[\s-]*|0)?[6-9](?:[\s-]?\d){9}(?!\d)/g, " , ");
+  for (const re of CONTACT_FILLER) s = s.replace(re, " ");
+  for (const seg of s.split(/[,;\n]|\band\b|&/i)) {
+    const piece = seg.replace(/\s+/g, " ").trim();
+    if (piece.length < 2) continue;
+    const name = parseName(piece);
+    if (name && name.length >= 2 && !findPlace(norm(name)) && !strainWordsIn(norm(name)).length) return name;
+  }
+  return null;
+}
+
+/** LB-19 human check: a phone-like digit run that is NOT a valid 10-digit Indian mobile. */
+export function looksLikeBadNumber(raw: string): boolean {
+  if (extractIndianMobile(raw)) return false;
+  if (/(₹|\brs\.?\s*|\binr\b)\s*\d/i.test(raw)) return false;
+  const runs = raw.match(/\+?\d[\d\s-]{6,18}\d/g) ?? [];
+  return runs.some((r) => {
+    const d = r.replace(/\D/g, "");
+    return d.length >= 8 && d.length <= 13 && !/^\d{1,2}[\s-]\d{1,2}[\s-]\d{2,4}$/.test(r.trim());
+  });
+}
+
+/** LB-19: reply to a captured number (closing message when the name is known too). */
+function contactAck(state: ChatState): Turn {
+  const a = contactAsk(state);
+  a.pending = false;
+  if (state.lead.name) {
+    state.completed = true;
+    a.awaitingName = false;
+    return { reply: ANSWERS.handoffClose(state.lead.name), intent: "contact_saved", completedNow: true };
+  }
+  a.awaitingName = true;
+  return { reply: ANSWERS.contactNeedName, intent: "contact_saved_need_name" };
+}
+
+/** LB-19: thanks / bye / ok on its own (a courtesy after the closing message stays in that chat). */
+export function isCourtesyOnly(text: string): boolean {
+  const t = norm(text);
+  if (!t || t.length > 60) return false;
+  const p = pleasantryOnly(t);
+  if (p === "thanks" || p === "bye") return true;
+  return /^(ok|okay|k|kk|sure|great|cool|fine|noted|done|super|nice|good|alright|all\s+right|thanks?|thank\s+you|thx|ty|bye|tata|nandri|seri|sari)(\s+(ok|okay|thanks?|thank\s+you|bye|shiva|sir|anna|bro|da|so\s+much|a\s+lot))*[\s!.,]*$/.test(t);
 }
 
 // ---------------------------------------------------------------------------
@@ -1585,7 +1718,9 @@ export const INTENT_RULES: readonly IntentRule[] = [
     // LB-6 A4: "is this a bot? I want a real person" -> who we are + the site steer.
     run: ({ state }) => {
       state.pendingOffer = null;
-      return { reply: `${ANSWERS.areYouHuman} ${pushReply(state)}`, intent: "are_you_human" };
+      // LB-19: plus the name + WhatsApp ask (or the LB-15 line after a decline).
+      const push = contactOrPush(state);
+      return { reply: `${ANSWERS.areYouHuman} ${push.reply}`, intent: "are_you_human" };
     },
   },
   {
@@ -1599,8 +1734,9 @@ export const INTENT_RULES: readonly IntentRule[] = [
     test: (m) => (RE.talkToShiva.test(m.t) || HUMAN_PUSH.test(m.t) || isReachAsk(m.t)) && !(RE.visit.test(m.t) && !PERSON_WORD.test(m.t)) && !ORDER_RECEIVED.test(m.t),
     run: ({ state }) => {
       state.pendingOffer = null;
-      // LB-15: 3rd push onward gets the polite "place your requirement" reply, rotated.
-      return { reply: pushReply(state), intent: "human_push" };
+      // LB-19: no number yet -> the name + WhatsApp ask (was the LB-14 self-explanatory line).
+      // LB-15's polite, rotated line still applies once the number was declined / both asks used.
+      return contactOrPush(state);
     },
   },
 
@@ -1823,14 +1959,26 @@ export const INTENT_RULES: readonly IntentRule[] = [
       priceOrAvailability(state, raw, t, ctx, sizeAskRe.test(t) || COLOURS.some((c) => t.includes(c)) ? "available" : "strain"),
   },
   {
-    // Contact details typed out of the blue: start the handoff with them prefilled.
-    // LB-6: a number typed out of the blue is a callback push: steer to the site
-    // (the cart's Place request form collects the WhatsApp number). No handoff.
-    id: "contact_typed", tier: "faq", faq: "LB-6: steer to site",
+    // LB-19 (replaces LB-6 contact_typed_steer): a number typed anywhere is saved
+    // (respond() already stored it, with a name if one came along) and acknowledged.
+    // Name + number -> the closing message (the chat ends); number only -> ask the name.
+    id: "contact_typed", tier: "faq", faq: "LB-19: contact saved",
     test: (m) => extractIndianMobile(m.raw) !== null,
     run: ({ state }) => {
       state.pendingOffer = null;
-      return { reply: pushReply(state), intent: "contact_typed_steer" };
+      return contactAck(state);
+    },
+  },
+  {
+    // LB-19 human check: digits that aren't a valid 10-digit Indian mobile -> recheck, never a Lead.
+    id: "phone_invalid", tier: "faq", faq: "LB-19: recheck number",
+    test: (m) => looksLikeBadNumber(m.raw),
+    run: ({ state }) => {
+      state.pendingOffer = null;
+      state.badNumbers = (state.badNumbers ?? 0) + 1;
+      if (!state.flags.includes("INVALID NUMBER TYPED" as LeadFlag)) state.flags.push("INVALID NUMBER TYPED" as LeadFlag);
+      contactAsk(state).pending = true;
+      return { reply: ANSWERS.phoneInvalid, intent: "phone_invalid" };
     },
   },
   {
@@ -2091,7 +2239,9 @@ export async function respond(prev: ChatState | null | undefined, message: strin
   state.turns += 1;
   updateTags(state, t);
 
-  const turn = state.handoff.active ? await handoffTurn(state, raw, t, ctx) : await routeIntent(state, raw, t, ctx);
+  const prevPhone = state.lead.phone;
+  const turn = state.handoff.active ? await handoffTurn(state, raw, t, ctx) : await chatTurn(state, raw, t, ctx);
+  const phoneCapturedNow = Boolean(state.lead.phone && state.lead.phone !== prevPhone);
 
   return {
     reply: turn.reply,
@@ -2099,5 +2249,78 @@ export async function respond(prev: ChatState | null | undefined, message: strin
     state,
     intent: turn.intent,
     completedNow: Boolean(turn.completedNow),
+    phoneCapturedNow,
+    closedNow: Boolean(turn.completedNow),
   };
+}
+
+/**
+ * LB-19: one turn outside a handoff. Saves a number typed anywhere (plus a name
+ * next to it), handles replies to the name + WhatsApp ask, routes the message,
+ * then appends the ask after a real-interest answer.
+ */
+async function chatTurn(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
+  const a = state.contactAsk;
+  const wasPending = Boolean(a?.pending);
+  const awaitingName = Boolean(a?.awaitingName);
+  if (a) {
+    a.pending = false;
+    a.awaitingName = false;
+  }
+  const short = t.split(" ").length <= 5;
+
+  // A number typed anywhere is saved, whatever else the message says.
+  const phone = extractIndianMobile(raw);
+  let captured = false;
+  if (phone && phone !== state.lead.phone) {
+    state.lead.phone = phone;
+    captured = true;
+    const name = state.lead.name ? null : nameNearNumber(raw);
+    if (name) state.lead.name = name;
+    prefillFromMessage(state, raw, t);
+  }
+
+  if (!phone && awaitingName && safetyIntent(raw) === null) {
+    // "Ravi" after "What name should he use?"
+    const name = short ? parseName(raw) : null;
+    if (name && !strainWordsIn(t).length && !findPlace(t)) {
+      state.lead.name = name;
+      return contactAck(state);
+    }
+  }
+  const turn = await routeIntent(state, raw, t, ctx);
+
+  // A plain "no" / "yes" to the ask (only when the message isn't a question of its own).
+  const generic = ["unclear", "ack", "off_topic", "offer_declined", "small_talk", "thanks"].includes(turn.intent);
+  if (!phone && wasPending && short && generic) {
+    if (RE.negate.test(t) || RE.declineField.test(t) || RE.cancel.test(t)) {
+      contactAsk(state).declined = true;
+      state.pendingOffer = null;
+      return { reply: ANSWERS.handoffDeclined, intent: "contact_declined" };
+    }
+    if (RE.affirm.test(t) && !/\?/.test(raw)) {
+      contactAsk(state).pending = true;
+      return { reply: ANSWERS.contactAskYes, intent: "contact_yes" };
+    }
+  }
+
+  // Name alone after an ask ("Ravi"): nothing else matched, so it's the name.
+  if (!phone && wasPending && !state.lead.name && (turn.intent === "unclear" || turn.intent === "off_topic") && t.split(" ").length <= 3) {
+    const name = parseName(raw);
+    if (name && !strainWordsIn(t).length) {
+      state.lead.name = name;
+      contactAsk(state).pending = true;
+      return { reply: ANSWERS.handoffAskPhone(name), intent: "contact_name" };
+    }
+  }
+  if (captured && /^(human_push|are_you_human)/.test(turn.intent)) {
+    // "connect me to Shiva, 98450 12345": the number is the answer to the push.
+    return contactAck(state);
+  }
+  if (captured && turn.intent !== "contact_saved" && turn.intent !== "contact_saved_need_name" && !turn.completedNow) {
+    // The number came with another question (or a safety message): answer first, then acknowledge.
+    if (state.handoff.active) return turn;
+    return { ...turn, reply: join(turn.reply, ANSWERS.contactNoted) };
+  }
+  return maybeAppendAsk(state, turn);
 }

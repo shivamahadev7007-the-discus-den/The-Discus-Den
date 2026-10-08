@@ -18,8 +18,13 @@ import { createSqlChatStore } from "@/lib/chat/store";
  *   CHAT_LEAD_ALERT_FROM       sender, default "The Discus Den Chat <onboarding@resend.dev>"
  *   CHAT_LEAD_ALERT_TIMEOUT_MS email send timeout, default 5000
  *   CHAT_PRICE_CACHE_SECONDS   live-price cache TTL, default 60; 0 = always live
- *   CHAT_ALERT_IP_CAP_24H      max sent lead alerts per IP hash per 24 h (default 2)
- *   CHAT_ALERT_GLOBAL_CAP_HOUR max sent lead alerts per hour overall (default 20)
+ *   CHAT_ALERT_IP_CAP_24H      max Visitor chat emails per IP hash per 24 h (default 3; Leads skip it)
+ *   CHAT_ALERT_GLOBAL_CAP_HOUR max chat emails per hour overall (default 20; over it -> daily digest)
+ *   CHAT_IDLE_MINUTES          a chat ends after this many quiet minutes (default 10)
+ *   CRON_SECRET                protects /api/chat/cron (Vercel sends it as a Bearer token)
+ *
+ * LB-19: one email per CHAT, sent when the chat ends (see docs/chat-lead-alerts.md,
+ * /api/chat/end and /api/chat/cron).
  */
 
 const store = createSqlChatStore(getSql);
