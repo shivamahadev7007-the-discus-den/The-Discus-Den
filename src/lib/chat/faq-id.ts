@@ -48,6 +48,9 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.contactAskTalk, "LB-19 ask"],
   [ANSWERS.contactAskTalk2, "LB-19 ask"],
   [ANSWERS.contactAskYes, "LB-19 ask"],
+  // LB-22: the other human-request rotation variants (0 and 1 are contactAskTalk / contactAskTalk2).
+  [ANSWERS.humanAskBoth(2), "LB-19 ask"],
+  [ANSWERS.humanAskBoth(3), "LB-19 ask"],
   [ANSWERS.contactNeedName, "LB-19 contact saved"],
   [ANSWERS.phoneInvalid, "LB-19 recheck number"],
   [ANSWERS.humanPush, "LB-6 steer"],
@@ -117,5 +120,12 @@ export function faqIdOf(reply: string): string {
   if (/^Thanks(, [^.]+)?\. What's the best WhatsApp/.test(first)) return "handoff:phone";
   if (/^Thanks, [^.]+\. How can I help\?/.test(first)) return "name-given";
   if (/^Thank you(, [^.]+)?\. I've passed this to Shiva/.test(first)) return "handoff:close";
+  for (let k = 0; k < 4; k++) if (first === ANSWERS.humanAskName(k)) return "LB-22 ask name";
+  if (/^(Thanks|Sure|Of course), [^.]+\. (What's your WhatsApp number|Please share your WhatsApp number|Type your WhatsApp number)|^Happy to pass this to Shiva, [^.]+\. What's the best WhatsApp number/.test(first)) return "LB-22 ask number";
+  // LB-24 / LB-25: privacy reply, rotated declines, composed later asks and "passed" replies.
+  for (let k = 1; k < 5; k++) if (first === ANSWERS.askDeclined(k)) return "declined";
+  for (let k = 0; k < 3; k++) if (first === ANSWERS.privacyNoDetails(k) || first === ANSWERS.privacyHasDetails(k)) return "LB-24 privacy";
+  if (/^(Thanks|Noted|All set|Got it|Thanks again), [^.]+\. (I've passed your details to Shiva|Your name and number from this chat are with Shiva|Shiva already has your details|I've shared your details with Shiva)/.test(first)) return "LB-25 passed";
+  if (/get back to you personally/.test(first) && /WhatsApp number|your name/i.test(first)) return "LB-25 ask";
   return "other";
 }

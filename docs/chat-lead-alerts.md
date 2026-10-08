@@ -33,11 +33,14 @@ else uses the chat; on a completely quiet site, at the latest with the 09:00 IST
 - Subject `[Lead] New chat lead: <name> — <summary>` when a valid name + mobile (10 digits starting 6–9,
   `+91` / `91` / `0`, spaces and dashes allowed) was captured in that chat; otherwise
   `[Visitor] Website chat: …`, or `[Visitor · likely genuine]` for name + city without a valid mobile.
-  A returning visitor whose name + mobile are known from an earlier chat on the same browser gets
-  `[Lead · returning] Website chat: <name> — …` (never an "Unnamed visitor" email).
+  LB-24 (privacy): the email shows only details typed in THIS chat. `[Lead · returning] Website chat: <name> — …`
+  is decided server-side only, when the valid number typed in this chat matches one typed in an earlier
+  chat on the same browser (compared via one-way keys; the old number is never stored or shown). A
+  returning browser with no number typed in this chat is a plain `[Visitor]`. The bot itself never shows
+  or uses any earlier chat's name / number (shared devices).
 - A country code with too few digits ("+91 98765 000") or any other partial number is never saved: the bot
   asks the visitor to check it, and such a chat is never a Lead.
-- Body: tag, name, phone, city, source, earlier-chat details, chat started / last message / ended (+ why),
+- Body: tag, name, phone, city (this chat only), source, chat started / last message / ended (+ why),
   chat id, the TDD lead card, and the full transcript of that chat only (HTML escaped + plain text).
 - Resend `Idempotency-Key`: `tdd-chat-<chatId>` (per chat, so a returning visitor's email is not deduped).
 - Code: `src/lib/chat/lead-alert.ts` (`buildLeadAlertEmail`, `sendLeadAlert`, `buildDigestEmail`, `sendChatDigest`),

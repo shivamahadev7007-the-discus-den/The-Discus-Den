@@ -54,6 +54,115 @@ export function outOfAreaReply(place?: string, abroad = false): string {
 
 export const PER_PIECE_LINE = "All prices are per piece. A pair is two pieces.";
 
+/** LB-25 pools (see humanAskLater / humanPassed / privacy*). Sizes are pairwise coprime per reply. */
+const LATER_ASK_BOTH: readonly string[] = [
+  "Could you type your name and WhatsApp number here?",
+  "Please share your name and the best WhatsApp number to reach you.",
+  "What name and WhatsApp number should I pass to Shiva?",
+  "Please drop your name and WhatsApp number in this chat.",
+  "May I have your name and a WhatsApp number to pass on?",
+  "Just type your name and WhatsApp number below.",
+  "Your name and WhatsApp number are all I need to pass this on.",
+  "Could I have your name and WhatsApp number, please?",
+  "Please send your name with a WhatsApp number he can reach.",
+  "Type your name and WhatsApp number whenever you're ready.",
+];
+const LATER_ASK_PHONE = (n: string): readonly string[] => [
+  `${n}, could you type your WhatsApp number here?`,
+  `Please share your WhatsApp number, ${n}.`,
+  `What WhatsApp number should I pass to Shiva, ${n}?`,
+  `${n}, please drop your WhatsApp number in this chat.`,
+  `May I have a WhatsApp number to pass on, ${n}?`,
+  `Just type your WhatsApp number below, ${n}.`,
+  `${n}, a WhatsApp number is all I need to pass this on.`,
+  `Could I have your WhatsApp number, ${n}?`,
+  `Please send a WhatsApp number he can reach you on, ${n}.`,
+  `Type your WhatsApp number whenever you're ready, ${n}.`,
+];
+const LATER_ASK_NAME: readonly string[] = [
+  "Could you tell me your name?",
+  "What name should Shiva use for you?",
+  "May I have your name to pass on with your number?",
+  "Please type your name here.",
+  "Just tell me your name and I'll pass it on.",
+  "What's your name, please?",
+  "Your name is all I need now.",
+  "Could I have your name, please?",
+  "Please share the name Shiva should ask for.",
+  "Type your name whenever you're ready.",
+];
+const LATER_NOTES: readonly string[] = [
+  "Shiva will get back to you personally.",
+  "Shiva will then get back to you personally.",
+  "Once I have it, Shiva will get back to you personally.",
+  "Shiva reads every request and will get back to you personally.",
+  "Shiva himself will get back to you personally.",
+  "Shiva will get back to you personally on WhatsApp.",
+  "I'll pass it on, and Shiva will get back to you personally.",
+  "That way Shiva can get back to you personally.",
+  "Shiva will get back to you personally as soon as he can.",
+  "With that, Shiva can get back to you personally.",
+  "Shiva will make sure to get back to you personally.",
+];
+const PASSED_OPENERS = (n: string): readonly string[] => [`Thanks, ${n}.`, `Noted, ${n}.`, `All set, ${n}.`, `Got it, ${n}.`, `Thanks again, ${n}.`];
+const PASSED_LINES: readonly string[] = [
+  "I've passed your details to Shiva, and he'll get back to you personally.",
+  "Your name and number from this chat are with Shiva, and he'll get back to you personally.",
+  "Shiva already has your details from this chat and will get back to you personally.",
+  "I've shared your details with Shiva; he'll get back to you personally.",
+];
+const PASSED_CLOSERS: readonly string[] = [
+  "Anything else I can help with?",
+  "Is there anything else you'd like to know meanwhile?",
+  "Happy to help with anything else in the meantime.",
+];
+const PRIVACY_ASK: readonly string[] = [
+  "For your privacy I can't show any saved details here. If you'd like Shiva to get back to you, please type your name and WhatsApp number.",
+  "To keep everyone's information private, I can't show saved details in this chat. Please type your name and WhatsApp number here if you'd like Shiva to get back to you.",
+  "I'm not able to display any saved names or numbers, for your privacy. If you'd like Shiva to reach you, just type your name and WhatsApp number.",
+];
+const PRIVACY_HELD: readonly string[] = [
+  "For your privacy I don't repeat details back here. What you typed in this chat is with Shiva, and he'll get back to you personally.",
+  "To keep your information private I don't show it here, but the details you typed in this chat are with Shiva.",
+  "I don't display personal details in the chat, for your privacy. Shiva has what you typed here and will get back to you personally.",
+];
+const ASK_DECLINED: readonly string[] = [
+  "No problem. Anything else I can help with?",
+  "That's fine. Is there anything else you'd like to know?",
+  "Sure, no worries. What else can I help with?",
+  "Okay. I'm here if you have any other questions.",
+  "No problem at all. Feel free to ask anything else.",
+];
+/** Extra sentences that keep a composed reply unique past its pools' period (bijective digits). */
+const ROT_EXTRAS: readonly string[] = ["Thank you for your patience.", "We appreciate it.", "It only takes a moment.", "We're glad you're here.", "Happy to help.", "Thanks for asking."];
+function gcd(a: number, b: number): number {
+  return b ? gcd(b, a % b) : a;
+}
+/**
+ * LB-25: the k-th composed reply: one sentence from each pool (index k mod pool size, so
+ * pairwise-coprime pool sizes give a different combination for every k in one period),
+ * then past the period extra sentences picked by the bijective digits of k / period.
+ * Never the same text twice for different k.
+ */
+export function composeRot(k: unknown, pools: readonly (readonly string[])[]): string {
+  const i = typeof k === "number" && Number.isInteger(k) && k >= 0 ? k : 0;
+  const parts = pools.map((p) => p[i % p.length]!);
+  const period = pools.reduce((a, p) => (a * p.length) / gcd(a, p.length), 1);
+  let q = Math.floor(i / period);
+  while (q > 0) {
+    q -= 1;
+    parts.push(ROT_EXTRAS[q % ROT_EXTRAS.length]!);
+    q = Math.floor(q / ROT_EXTRAS.length);
+  }
+  return parts.join(" ");
+}
+
+/** LB-22: the k-th phrasing of a rotation (wraps; a non-number index reads as 0). */
+function pickRot(list: readonly string[], k: unknown): string {
+  const i = typeof k === "number" && Number.isInteger(k) && k >= 0 ? k : 0;
+  return list[i % list.length]!;
+}
+
 export const ANSWERS = {
   // Section 2
   welcome:
@@ -116,15 +225,63 @@ export const ANSWERS = {
    * LB-19 (Shiva, 8 Oct): name + WhatsApp asks. [Photos] goes after the first
    * real-interest question; [Reserve] is the one later re-ask with a different
    * reason. Max 2 asks per chat, then the bot stops asking.
+   * LB-21 (Shiva, 8 Oct): asks only promise that Shiva gets back personally. Never
+   * promise a reservation or a stock alert (the constant name is kept, no refactor).
    */
-  contactAskPhotos: "May I have your name and WhatsApp number? Shiva can send you photos and videos of the actual fish.",
+  // LB-21 part 2 (Shiva, 8 Oct): the first ask only promises passing the details to Shiva (no photos / videos).
+  contactAskPhotos: "May I have your name and WhatsApp number? I'll pass them to Shiva so he can get back to you personally.",
   contactAskReserve:
-    "If you'd like, share your name and WhatsApp number. Shiva can help you reserve the fish you like, or message you when new stock arrives.",
+    "If you'd like, share your name and WhatsApp number, and Shiva can get back to you personally.",
   /** LB-19: "talk / connect to Shiva" gets the ask instead of the LB-14 self-explanatory line. */
   contactAskTalk:
-    "Sure, I can pass your request to Shiva. May I have your name and WhatsApp number? Shiva can send you photos and videos of the actual fish.",
+    "Sure, I can pass your request to Shiva. Could you share your name and WhatsApp number? He'll get back to you personally.",
   contactAskTalk2:
-    "Happy to pass this to Shiva. Please share your name and WhatsApp number here, and he can also help you reserve the fish you like.",
+    "Happy to pass this to Shiva. Please share your name and WhatsApp number here, and he can get back to you personally.",
+  /**
+   * LB-22 (Shiva, 8 Oct): EVERY human / owner / Shiva request asks for name + WhatsApp (not
+   * capped). Rotations: the next unused phrasing per chat, so no reply repeats word for word.
+   * Nothing here says details were passed: that is only said once a valid number exists.
+   */
+  /** Neither name nor number known. */
+  humanAskBoth: (k: unknown = 0): string =>
+    pickRot([
+      "Sure, I can pass your request to Shiva. Could you share your name and WhatsApp number? He'll get back to you personally.",
+      "Happy to pass this to Shiva. Please share your name and WhatsApp number here, and he can get back to you personally.",
+      "Of course. Please type your name and WhatsApp number here, and I'll pass them to Shiva so he can reach you personally.",
+      "I'll get your request to Shiva. What's your name and WhatsApp number? He'll get back to you personally.",
+    ], k),
+  /** Name known, no number. */
+  humanAskPhone: (name: string, k = 0): string =>
+    pickRot([
+      `Thanks, ${name}. What's your WhatsApp number? I'll pass it to Shiva so he can get back to you personally.`,
+      `Sure, ${name}. Please share your WhatsApp number here, and Shiva can get back to you personally.`,
+      `Happy to pass this to Shiva, ${name}. What's the best WhatsApp number for him to reach you on?`,
+      `Of course, ${name}. Type your WhatsApp number here and I'll pass it to Shiva so he can reach you personally.`,
+    ], k),
+  /** Valid number known (this chat or on file), no name. */
+  humanAskName: (k: unknown = 0): string =>
+    pickRot([
+      "Sure, I can pass this to Shiva. What name should he use when he gets back to you?",
+      "Happy to. May I have your name, so Shiva knows who he's getting back to?",
+      "Of course. What's your name? Shiva will use it when he reaches you on WhatsApp.",
+      "I'll pass this to Shiva. Just tell me your name so he knows who to get back to.",
+    ], k),
+  /**
+   * LB-25 (Shiva, 8 Oct 2:44 PM): from the 3rd human request, one ask sentence + one
+   * "Shiva will get back to you personally" note (replaces the LB-15 form line here).
+   * Composed per chat with a no-repeat index: the ask sentences and the notes don't repeat
+   * for the first 10 composed replies, and the whole reply never repeats at any count.
+   */
+  humanAskLater: (kind: "both" | "phone" | "name", k: unknown = 0, name = "there"): string =>
+    composeRot(k, [kind === "both" ? LATER_ASK_BOTH : kind === "name" ? LATER_ASK_NAME : LATER_ASK_PHONE(name), LATER_NOTES]),
+  /** LB-25: a valid name + number were typed IN THIS CHAT: further human requests say it's passed (no re-ask). */
+  humanPassed: (name: string, k: unknown = 0): string => composeRot(k, [PASSED_OPENERS(name), PASSED_LINES, PASSED_CLOSERS]),
+  /** LB-24: "what is my phone number / my name / my details?" with no valid number typed in this chat. */
+  privacyNoDetails: (k: unknown = 0): string => composeRot(k, [PRIVACY_ASK]),
+  /** LB-24: the same question after a valid number was typed in this chat (still never shown). */
+  privacyHasDetails: (k: unknown = 0): string => composeRot(k, [PRIVACY_HELD]),
+  /** LB-25 / Kiara G5: "no" to an ask, rotated per chat (the 1st is the existing handoffDeclined line). */
+  askDeclined: (k: unknown = 0): string => composeRot(k, [ASK_DECLINED]),
   /** LB-19: "yes" after an ask. */
   contactAskYes: "Great. Please type your name and WhatsApp number here.",
   /** LB-19: a number typed alongside another question (the answer comes first). */

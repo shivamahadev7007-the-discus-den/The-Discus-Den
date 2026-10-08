@@ -272,17 +272,20 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
       await h.close();
     });
 
-    it("returning visitor: back days later on the same session -> NEW chat -> its own email ([Lead · returning], known name), that chat's lines only", async () => {
+    // LB-24 (Shiva, 8 Oct 2:44 PM, privacy): an earlier chat's name / number never shapes a later
+    // chat or its email; with no number typed in chat 2 it's a plain [Visitor] (Kiara C5).
+    it("returning session, no number typed in the new chat -> NEW chat, its own [Visitor] email, nothing from chat 1 anywhere", async () => {
       const h = await make();
       const clock = { t: T0 };
       const { deps, sent } = makeDeps(h, clock);
+      const replies: string[] = [];
       await quiet(async () => {
         await say(deps, sid(11), "price of blue diamond?");
         await say(deps, sid(11), "I'm Ravi, 9845012345");
         await say(deps, sid(11), "thanks");
         clock.t += 3 * 24 * 60 * MIN; // back three days later, same browser session id
-        await say(deps, sid(11), "do you have blue diamond?");
-        await say(deps, sid(11), "price?");
+        replies.push(await say(deps, sid(11), "do you have blue diamond?"));
+        replies.push(await say(deps, sid(11), "price?"));
         await end(deps, sid(11));
       });
       assert.equal(sent.length, 2);
@@ -290,13 +293,11 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
       assert.match(subjectOf(sent[0]!), /^\[Lead\] New chat lead: Ravi/);
       assert.equal(sent[0]!.lead.chat?.endReason, "closing");
       assert.equal(sent[0]!.transcript.length, 6, "chat 1 incl. the post-close 'thanks'");
-      // Chat 2: no number typed in it, but name + number are known from chat 1 (Kiara #2 note).
-      assert.match(subjectOf(sent[1]!), /^\[Lead · returning\] Website chat: Ravi — /);
-      assert.equal(sent[1]!.transcript.length, 4);
-      assert.ok(!sent[1]!.transcript.some((l) => /9845012345/.test(l.text)));
-      const text = buildLeadAlertEmail(sent[1]!.lead, sent[1]!.transcript, { to: "x@example.com" }).text;
-      assert.match(text, /Earlier chat: Ravi, \+919845012345/);
-      assert.match(text, /Phone: {7}\+919845012345 \(from an earlier chat\)/);
+      assert.match(subjectOf(sent[1]!), /^\[Visitor\] Website chat: Unnamed visitor/);
+      const email = buildLeadAlertEmail(sent[1]!.lead, sent[1]!.transcript, { to: "x@example.com" });
+      for (const part of [email.subject, email.text, email.html]) assert.doesNotMatch(part, /Ravi|9845012345|98xxxxxx45|earlier chat/i);
+      assert.ok(replies[0]!.endsWith(ANSWERS.contactAskPhotos), "asks like for a fresh visitor");
+      for (const r of replies) assert.doesNotMatch(r, /Ravi|\d{2}x+\d{2}/);
       assert.equal((await h.chats()).length, 2);
       await h.close();
     });
@@ -593,7 +594,7 @@ describe("LB-19 · email content and Resend call", () => {
       /Tag: {9}Lead/,
       /Name: {8}Ravi/,
       /Phone: {7}\+919845012345/,
-      /City: {8}Kerala/, // the engine stores Kochi as its state
+      /City: {8}Kochi/, // LB-22: the volunteered city ("I live in Kochi") is kept (was its state, Kerala)
       /Source: {6}\?from=insta/,
       /Chat started: 08 Oct 2026, 11:30 IST/,
       /Chat ended: {3}08 Oct 2026, 11:41 IST \(closing message after details were collected, then 10 min with no messages\)/,
@@ -604,3 +605,152 @@ describe("LB-19 · email content and Resend call", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// LB-22 (Shiva, 8 Oct 2:13 PM) — Kiara's lb22-test-cases.md, email side (G4), on both stores.
+// ---------------------------------------------------------------------------
+const LB22_SHIVA = [
+  "Hey - how is it going. I am Arjun from Bangalore looking to buy discus.",
+  "Sounds good - how to order and pay online!",
+  "I see - thanks. Can you connect to the owner or a human agent?",
+];
+const LB22_CLAIM = /\b(I've|I have)\s+(already\s+)?(passed|shared|sent)\b|\bpassed your (details|number)\b/i;
+for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (PGlite + migrations)", pgHarness]] as const) {
+  describe(`LB-22 · human requests and the one email per chat · ${label}`, () => {
+    it("case 1: Shiva's chat + a valid number -> closing by name; End -> exactly 1 [Lead] email (Arjun, number, Bangalore, full transcript)", async () => {
+      const h = await make();
+      const { deps, sent } = makeDeps(h, { t: T0 });
+      const replies: string[] = [];
+      await quiet(async () => {
+        for (const m of LB22_SHIVA) replies.push(await say(deps, sid(221), m));
+        replies.push(await say(deps, sid(221), "My WhatsApp number is 9845012312"));
+        await end(deps, sid(221));
+      });
+      assert.ok(replies[0]!.endsWith(ANSWERS.humanAskPhone("Arjun", 0)));
+      assert.equal(replies[2], ANSWERS.humanAskPhone("Arjun", 1));
+      assert.doesNotMatch(replies[2]!, LB22_CLAIM);
+      assert.equal(replies[3], ANSWERS.handoffClose("Arjun"));
+      assert.equal(sent.length, 1);
+      const email = buildLeadAlertEmail(sent[0]!.lead, sent[0]!.transcript, { to: "x@example.com" });
+      assert.match(email.subject, /^\[Lead\] New chat lead: Arjun/);
+      assert.match(email.text, /Phone: {7}\+919845012312/);
+      assert.match(email.text, /City: {8}Bangalore/);
+      assert.equal(sent[0]!.transcript.length, 8);
+      assert.equal((await h.chats())[0]!.phone, "+919845012312");
+      await h.close();
+    });
+    it("case 1b: same chat, then 'No thanks' -> no claim; End -> 1 [Visitor] email (name Arjun, no number)", async () => {
+      const h = await make();
+      const { deps, sent } = makeDeps(h, { t: T0 });
+      const replies: string[] = [];
+      await quiet(async () => {
+        for (const m of [...LB22_SHIVA, "No thanks"]) replies.push(await say(deps, sid(222), m));
+        await end(deps, sid(222));
+      });
+      for (const r of replies) assert.doesNotMatch(r, LB22_CLAIM);
+      assert.equal(replies[3], ANSWERS.handoffDeclined);
+      assert.equal(sent.length, 1);
+      assert.match(subjectOf(sent[0]!), /^\[Visitor[^\]]*\] Website chat: Arjun/);
+      await h.close();
+    });
+    it("case 3b: an invalid number after the ask -> recheck, never saved; End -> [Visitor]", async () => {
+      const h = await make();
+      const { deps, sent } = makeDeps(h, { t: T0 });
+      const replies: string[] = [];
+      await quiet(async () => {
+        replies.push(await say(deps, sid(223), "Connect me to the owner"));
+        replies.push(await say(deps, sid(223), "+91 98765 000"));
+        await end(deps, sid(223));
+      });
+      assert.equal(replies[1], ANSWERS.phoneInvalid);
+      for (const r of replies) assert.doesNotMatch(r, LB22_CLAIM);
+      assert.match(subjectOf(sent[0]!), /^\[Visitor/);
+      assert.equal((await h.chats())[0]!.phone, null);
+      await h.close();
+    });
+    it("case 4: number first, then 'Can I talk to Shiva?' -> masked confirmation (no re-ask); End -> 1 [Lead] email", async () => {
+      const h = await make();
+      const { deps, sent } = makeDeps(h, { t: T0 });
+      const replies: string[] = [];
+      await quiet(async () => {
+        replies.push(await say(deps, sid(224), "I am Priya, my number is 9123456780"));
+        replies.push(await say(deps, sid(224), "Can I talk to Shiva?"));
+        await end(deps, sid(224));
+      });
+      assert.equal(replies[1], ANSWERS.humanPassed("Priya", 0), "LB-25: details typed in this chat -> passed, no re-ask");
+      assert.equal(sent.length, 1);
+      assert.match(subjectOf(sent[0]!), /^\[Lead\] New chat lead: Priya/);
+      await h.close();
+    });
+    it("LB-24: returning customer types the SAME number in the new chat -> [Lead · returning] (subject) and this chat's name + number in header, card and body", async () => {
+      const h = await make();
+      const clock = { t: T0 };
+      const { deps, sent } = makeDeps(h, clock);
+      const replies: string[] = [];
+      await quiet(async () => {
+        await say(deps, sid(225), "What is the price of Blue Diamond?");
+        await say(deps, sid(225), "I'm Ravi, 9845012345");
+        await end(deps, sid(225));
+        clock.t += 24 * 60 * MIN; // day 2, same browser session
+        replies.push(await say(deps, sid(225), "Can I talk to the owner?"));
+        replies.push(await say(deps, sid(225), "I am Ravi Kumar, 9845012345"));
+        await end(deps, sid(225));
+      });
+      assert.equal(replies[0], ANSWERS.humanAskBoth(0), "a fresh ask: nothing from chat 1 is used");
+      assert.equal(replies[1], ANSWERS.handoffClose("Ravi Kumar"));
+      assert.equal(sent.length, 2);
+      const email = buildLeadAlertEmail(sent[1]!.lead, sent[1]!.transcript, { to: "x@example.com" });
+      assert.match(email.subject, /^\[Lead · returning\] Website chat: Ravi Kumar/);
+      assert.match(email.text, /Name: {8}Ravi Kumar\n/);
+      assert.match(email.text, /Phone: {7}\+919845012345\n/);
+      assert.match(email.text, /TDD CHAT LEAD\nName: {8}Ravi Kumar\nWhatsApp: {4}\+919845012345/, "card matches the subject");
+      assert.doesNotMatch(email.text, /earlier chat|not given\nWhatsApp/);
+      await h.close();
+    });
+    it("LB-24 Kiara C1 (shared device): Meena on Ravi's browser types a DIFFERENT number -> plain [Lead] Meena; Ravi nowhere in replies or email", async () => {
+      const h = await make();
+      const clock = { t: T0 };
+      const { deps, sent } = makeDeps(h, clock);
+      const replies: string[] = [];
+      await quiet(async () => {
+        await say(deps, sid(226), "I am Ravi Kumar, my WhatsApp is 9845012345");
+        await end(deps, sid(226));
+        clock.t += 24 * 60 * MIN;
+        replies.push(await say(deps, sid(226), "Hi, I am Meena. Can I talk to the owner?"));
+        replies.push(await say(deps, sid(226), "What is my phone number?"));
+        replies.push(await say(deps, sid(226), "My number is 9123456780"));
+        await end(deps, sid(226));
+      });
+      assert.deepEqual(replies, [ANSWERS.humanAskPhone("Meena", 0), ANSWERS.privacyNoDetails(0), ANSWERS.handoffClose("Meena")]);
+      for (const r of replies) assert.doesNotMatch(r, /Ravi|9845012345|\d{2}x+\d{2}/i);
+      assert.equal(sent.length, 2);
+      assert.match(subjectOf(sent[0]!), /^\[Lead\] New chat lead: Ravi/);
+      const email = buildLeadAlertEmail(sent[1]!.lead, sent[1]!.transcript, { to: "x@example.com" });
+      assert.match(email.subject, /^\[Lead\] New chat lead: Meena/);
+      for (const part of [email.subject, email.text, email.html]) assert.doesNotMatch(part, /Ravi|9845012345|98xxxxxx45|earlier chat|returning/i);
+      assert.match(email.text, /Phone: {7}\+919123456780/);
+      await h.close();
+    });
+    it("LB-24 Kiara C2: shared device, 'No thanks' -> no claim; [Visitor] email with no old details anywhere", async () => {
+      const h = await make();
+      const clock = { t: T0 };
+      const { deps, sent } = makeDeps(h, clock);
+      const replies: string[] = [];
+      await quiet(async () => {
+        await say(deps, sid(227), "I am Ravi Kumar, my WhatsApp is 9845012345");
+        await end(deps, sid(227));
+        clock.t += 24 * 60 * MIN;
+        replies.push(await say(deps, sid(227), "Hi, I am Meena. Can I talk to the owner?"));
+        replies.push(await say(deps, sid(227), "No thanks"));
+        await end(deps, sid(227));
+      });
+      assert.equal(replies[1], ANSWERS.handoffDeclined);
+      for (const r of replies) assert.doesNotMatch(r, /Ravi|9845012345|\d{2}x+\d{2}|passed|with Shiva/i);
+      assert.equal(sent.length, 2);
+      const email = buildLeadAlertEmail(sent[1]!.lead, sent[1]!.transcript, { to: "x@example.com" });
+      assert.match(email.subject, /^\[Visitor\]/);
+      for (const part of [email.subject, email.text, email.html]) assert.doesNotMatch(part, /Ravi|9845012345|98xxxxxx45|earlier chat|returning/i);
+      await h.close();
+    });
+  });
+}

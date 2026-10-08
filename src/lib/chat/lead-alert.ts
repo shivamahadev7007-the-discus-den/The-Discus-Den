@@ -11,7 +11,7 @@
  * Callers only use sendLeadAlert(); it never throws.
  */
 
-import type { ChatState } from "./engine.ts";
+import { phoneKey, type ChatState } from "./engine.ts";
 
 /** LB-19: the chat (conversation) an email is about. */
 export type ChatMeta = {
@@ -32,22 +32,23 @@ export type LeadForAlert = {
 
 /**
  * LB-19 tags (Shiva, 8 Oct 11:37): Lead = a name AND a valid mobile were captured in this
- * chat; otherwise Visitor. LB-19 fix (Kiara #2 note): a returning visitor whose name +
- * valid mobile are already known from an earlier chat on the same browser is tagged
- * "Lead · returning" (never an "Unnamed visitor" Visitor email, and never capped).
+ * chat; otherwise Visitor. LB-24 (privacy, 2:44 PM): "Lead · returning" is decided here,
+ * server-side only, and only when the valid number typed IN THIS CHAT matches one typed in
+ * an earlier chat on the same browser (one-way keys in `onFile`). Nothing from an earlier
+ * chat is ever shown, and a session with no number typed in this chat is just a Visitor.
  */
 export function chatTag(s: ChatState): { tag: "Lead" | "Visitor"; likelyGenuine: boolean; returning: boolean } {
   const fresh = Boolean(s.lead.phone && s.lead.name);
-  const returning = !fresh && Boolean(s.prior?.phone && (s.prior?.name || s.lead.name));
-  const tag = fresh || returning ? "Lead" : "Visitor";
+  const returning = fresh && Boolean(s.onFile?.includes(phoneKey(s.lead.phone!)));
+  const tag = fresh ? "Lead" : "Visitor";
   // Visitor with a name and a city: probably a real buyer even without a number.
   const likelyGenuine = tag === "Visitor" && !s.lead.phone && Boolean(s.lead.name && (s.lead.city || s.lead.stateName));
   return { tag, likelyGenuine, returning };
 }
 
-/** Name / phone for the email: this chat's, else the one known from an earlier chat. */
+/** LB-24: name for the email: only the one typed in this chat. */
 function shownName(s: ChatState): string | null {
-  return s.lead.name ?? s.prior?.name ?? null;
+  return s.lead.name ?? null;
 }
 
 const END_REASON: Record<string, string> = {
@@ -60,17 +61,14 @@ const END_REASON: Record<string, string> = {
 export function chatHeaderLines(lead: LeadForAlert): string[] {
   const s = lead.state;
   const { tag, likelyGenuine, returning } = chatTag(s);
-  const earlier = " (from an earlier chat)";
+  // LB-24: only details typed in this chat; nothing from an earlier chat (no old name / number).
   const lines = [
-    `Tag:         ${tag}${likelyGenuine ? " · likely genuine" : ""}${returning ? " · returning (details known from an earlier chat)" : ""}`,
-    `Name:        ${s.lead.name ?? (s.prior?.name ? `${s.prior.name}${earlier}` : "not given")}`,
-    `Phone:       ${s.lead.phone ?? (s.prior?.phone ? `${s.prior.phone}${earlier}` : "not given")}`,
+    `Tag:         ${tag}${likelyGenuine ? " · likely genuine" : ""}${returning ? " · returning (same number as a previous chat on this browser)" : ""}`,
+    `Name:        ${s.lead.name ?? "not given"}`,
+    `Phone:       ${s.lead.phone ?? "not given"}`,
     `City:        ${s.lead.city ?? s.lead.stateName ?? "not given"}`,
     `Source:      ?from=${lead.source || "direct"}`,
   ];
-  if (s.prior && (s.prior.name || s.prior.phone)) {
-    lines.push(`Earlier chat: ${[s.prior.name, s.prior.phone, s.prior.city].filter(Boolean).join(", ")} (same browser)`);
-  }
   if (s.badNumbers) lines.push(`Note:        typed a number that failed the 10-digit mobile check`);
   if (lead.chat) {
     lines.push(`Chat started: ${istTime(new Date(lead.chat.startedAt))}`);
@@ -213,7 +211,7 @@ export function buildLeadAlertEmail(
   const header = chatHeaderLines(lead);
   const card = formatLeadAlert(lead, opts.now ?? new Date());
   const contact = [
-    `Phone/WhatsApp: ${s.lead.phone ?? s.prior?.phone ?? "not given"}`,
+    `Phone/WhatsApp: ${s.lead.phone ?? "not given"}`,
     `Email: ${email ?? "not given"}`,
   ];
   const flagsLine = s.flags.length ? s.flags.join(" · ") : "none";
@@ -249,7 +247,7 @@ export function buildLeadAlertEmail(
     `<pre style="margin:0 0 12px;font-size:12px">${escapeHtml(header.join("\n"))}</pre>`,
     `<p style="margin:0 0 12px"><strong>Summary:</strong> ${escapeHtml(summary)}</p>`,
     `<ul style="margin:0 0 12px;padding-left:18px">`,
-    `<li><strong>Phone/WhatsApp:</strong> ${escapeHtml(s.lead.phone ?? s.prior?.phone ?? "not given")}</li>`,
+    `<li><strong>Phone/WhatsApp:</strong> ${escapeHtml(s.lead.phone ?? "not given")}</li>`,
     `<li><strong>Email:</strong> ${escapeHtml(email ?? "not given")}</li>`,
     `<li><strong>Tags:</strong> ${escapeHtml(flagsLine)}</li>`,
     `</ul>`,

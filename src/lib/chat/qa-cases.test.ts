@@ -24,8 +24,17 @@ const catalog: CatalogLoader = {
   foods: async () => ({ frozen: fixture.catalog.frozen, pellets: fixture.catalog.pellets }),
 };
 
+/** LB-22 sweep (Kiara G1): no reply anywhere in this suite claims the details were passed without a valid number. */
+const PASSED_CLAIM = /\b(I've|I have)\s+(already\s+)?(passed|shared|sent)\b|\bpassed your (details|number)\b|\bShiva has your (details|number)\b|\bShiva will contact you\b/i;
+function assertNoFalseClaim(reply: string, s: ChatState, ctx: string): void {
+  // LB-24: only a valid number typed IN THIS CHAT counts; no masked / partial number ever appears.
+  if (PASSED_CLAIM.test(reply)) assert.ok(s.lead.phone, `'passed' claim without a valid number typed in this chat: ${ctx} -> ${reply}`);
+  assert.doesNotMatch(reply, /\d{2}x{2,}\d{2}/i, `masked number in a reply: ${ctx}`);
+}
 async function ask(message: string, state: ChatState | null = null) {
-  return respond(state, message, { catalog });
+  const r = await respond(state, message, { catalog });
+  assertNoFalseClaim(r.reply, r.state, message);
+  return r;
 }
 async function convo(messages: string[]) {
   let state: ChatState | null = null;
