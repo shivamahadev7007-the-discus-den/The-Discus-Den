@@ -112,6 +112,29 @@ export const ANSWERS = {
     "I've already passed your details to Shiva with our chat. He'll get back to you personally. Anything else I can help with?",
   handoffDeclined: "No problem. Anything else I can help with?",
 
+  /**
+   * LB-19 (Shiva, 8 Oct): name + WhatsApp asks. [Photos] goes after the first
+   * real-interest question; [Reserve] is the one later re-ask with a different
+   * reason. Max 2 asks per chat, then the bot stops asking.
+   */
+  contactAskPhotos: "May I have your name and WhatsApp number? Shiva can send you photos and videos of the actual fish.",
+  contactAskReserve:
+    "If you'd like, share your name and WhatsApp number. Shiva can help you reserve the fish you like, or message you when new stock arrives.",
+  /** LB-19: "talk / connect to Shiva" gets the ask instead of the LB-14 self-explanatory line. */
+  contactAskTalk:
+    "Sure, I can pass your request to Shiva. May I have your name and WhatsApp number? Shiva can send you photos and videos of the actual fish.",
+  contactAskTalk2:
+    "Happy to pass this to Shiva. Please share your name and WhatsApp number here, and he can also help you reserve the fish you like.",
+  /** LB-19: "yes" after an ask. */
+  contactAskYes: "Great. Please type your name and WhatsApp number here.",
+  /** LB-19: a number typed alongside another question (the answer comes first). */
+  contactNoted: "Thanks, I've passed your number to Shiva with our chat.",
+  /** LB-19: number typed without a name. */
+  contactNeedName: "Thanks, I've passed your number to Shiva with our chat. What name should he use when he reaches you?",
+  /** LB-19 human check: digits that are not a valid 10-digit Indian mobile. Never emailed as a Lead. */
+  phoneInvalid:
+    "That number doesn't look like a valid 10-digit mobile. Could you check it and type it again? Shiva needs a working WhatsApp number to reach you.",
+
   // Section 4: FAQs
   faqStrains:
     "Our live list is here: thediscusden.com/available. Each card shows the strain, size and price. Want me to narrow it down by size or colour?",

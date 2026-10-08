@@ -10,7 +10,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createCatalogLoader, type CatalogLoader } from "./catalog.ts";
-import { handleChatRequest } from "./http.ts";
+import { handleChatEnd, handleChatRequest } from "./http.ts";
 import { sendLeadAlert, type AlertFetch, type LeadForAlert, type TranscriptLine } from "./lead-alert.ts";
 import { createMemoryChatStore } from "./store.ts";
 
@@ -55,6 +55,23 @@ async function runChat(deps: Parameters<typeof handleChatRequest>[1], msgs: stri
   return out;
 }
 
+/** LB-19: the widget's close / pagehide beacon (POST /api/chat/end). */
+async function endChat(deps: Parameters<typeof handleChatEnd>[1], id: string, ip = "203.0.113.70") {
+  const req = new Request("https://thediscusden.com/api/chat/end", {
+    method: "POST",
+    headers: { "content-type": "text/plain;charset=UTF-8", origin: "https://thediscusden.com", "x-forwarded-for": ip },
+    body: JSON.stringify({ sessionId: id }),
+  });
+  return handleChatEnd(req, deps);
+}
+
+/** LB-19 fix (Kiara #2): a whole chat, then the widget's /end (the email goes at chat end, not at the closing message). */
+async function runAndEnd(deps: Parameters<typeof handleChatRequest>[1], msgs: string[], id: string, ip = "203.0.113.70") {
+  const out = await runChat(deps, msgs, id, ip);
+  await endChat(deps, id, ip);
+  return out;
+}
+
 async function quiet<T>(fn: () => Promise<T>): Promise<{ result: T; logs: string[] }> {
   const logs: string[] = [];
   const [l, w] = [console.log, console.warn];
@@ -78,14 +95,19 @@ function emailDeps(store: ReturnType<typeof createMemoryChatStore>, fetchImpl: A
 }
 
 describe("LB-7 · alert fires when the lead is actionable", () => {
-  it("visitor gives name + number then stops replying -> one email on the number turn", async () => {
+  // LB-19 (Shiva, 8 Oct 11:37): no email on the number turn any more; ONE email when the chat ends.
+  it("visitor gives name + number then closes the chat -> no email on the number turn, one Lead email at /end", async () => {
     const { calls, fetchImpl } = recorder();
     const store = createMemoryChatStore();
-    const { result: out } = await quiet(() => runChat(emailDeps(store, fetchImpl), STOP_AFTER_NUMBER, sid(7001)));
+    const deps = emailDeps(store, fetchImpl);
+    const { result: out } = await quiet(() => runChat(deps, STOP_AFTER_NUMBER, sid(7001)));
     assert.ok(out.every((o) => o.status === 200));
+    assert.equal(calls.length, 0, "nothing sent while the chat is open");
+    await quiet(() => endChat(deps, sid(7001)));
     assert.equal(calls.length, 1);
     const body = JSON.parse(String(calls[0]!.init.body));
-    assert.match(body.subject, /^New chat lead: Ravi — /);
+    assert.match(body.subject, /^\[Lead\] New chat lead: Ravi — /);
+    assert.match(body.text, /visitor closed the chat/);
     assert.match(body.text, /Phone\/WhatsApp: \+919845012345/);
     assert.equal(store.leads.get(sid(7001))?.alertStatus, "sent");
     // The handoff itself carries on normally (asks for the city next).
@@ -95,7 +117,7 @@ describe("LB-7 · alert fires when the lead is actionable", () => {
 
   it("full handoff -> still exactly one email (not one at the number and another at the end)", async () => {
     const { calls, fetchImpl } = recorder();
-    const { result: out } = await quiet(() => runChat(emailDeps(createMemoryChatStore(), fetchImpl), [...FULL, "thanks", "Can I visit the store?"], sid(7002)));
+    const { result: out } = await quiet(() => runAndEnd(emailDeps(createMemoryChatStore(), fetchImpl), [...FULL, "thanks", "Can I visit the store?"], sid(7002)));
     assert.ok(out.every((o) => o.status === 200));
     assert.equal(calls.length, 1);
   });
@@ -108,7 +130,11 @@ describe("LB-7 · alert fires when the lead is actionable", () => {
 
   it("successful send logs a positive line with the Resend id, never the key or the number", async () => {
     const { fetchImpl } = recorder();
-    const { logs } = await quiet(() => runChat(emailDeps(createMemoryChatStore(), fetchImpl), STOP_AFTER_NUMBER, sid(7004)));
+    const deps = emailDeps(createMemoryChatStore(), fetchImpl);
+    const { logs } = await quiet(async () => {
+      await runChat(deps, STOP_AFTER_NUMBER, sid(7004));
+      await endChat(deps, sid(7004));
+    });
     assert.ok(logs.some((l) => l === "[chat] lead alert sent: email via Resend id=em_fake_123"), logs.join("\n"));
     for (const l of logs) {
       assert.doesNotMatch(l, /re_test_FAKEKEY_lb7/);
@@ -122,15 +148,15 @@ describe("LB-7 · only real sends count toward the caps", () => {
     const store = createMemoryChatStore();
     const off = recorder();
     await quiet(async () => {
-      await runChat(emailDeps(store, off.fetchImpl, {}), FULL, sid(7101));
-      await runChat(emailDeps(store, off.fetchImpl, {}), FULL, sid(7102));
-      await runChat(emailDeps(store, off.fetchImpl, {}), FULL, sid(7103));
+      await runAndEnd(emailDeps(store, off.fetchImpl, {}), FULL, sid(7101));
+      await runAndEnd(emailDeps(store, off.fetchImpl, {}), FULL, sid(7102));
+      await runAndEnd(emailDeps(store, off.fetchImpl, {}), FULL, sid(7103));
     });
     assert.equal(off.calls.length, 0);
     assert.deepEqual(store.alerts.map((a) => a.status), ["not_sent_off", "not_sent_off", "not_sent_off"]);
 
     const on = recorder();
-    await quiet(() => runChat(emailDeps(store, on.fetchImpl), FULL, sid(7104)));
+    await quiet(() => runAndEnd(emailDeps(store, on.fetchImpl), FULL, sid(7104)));
     assert.equal(on.calls.length, 1);
     assert.equal(store.leads.get(sid(7104))?.alertStatus, "sent");
   });
@@ -138,46 +164,46 @@ describe("LB-7 · only real sends count toward the caps", () => {
   it("Resend 403 -> recorded as failed, logged, and the retry lead with the same number still emails", async () => {
     const store = createMemoryChatStore();
     const bad = recorder(403);
-    const { logs } = await quiet(() => runChat(emailDeps(store, bad.fetchImpl), FULL, sid(7201)));
+    const { logs } = await quiet(() => runAndEnd(emailDeps(store, bad.fetchImpl), FULL, sid(7201)));
     assert.equal(bad.calls.length, 1);
     assert.equal(store.leads.get(sid(7201))?.alertStatus, "failed");
     assert.ok(logs.some((l) => /lead alert failed: Resend HTTP 403/.test(l)));
 
     const good = recorder();
-    await quiet(() => runChat(emailDeps(store, good.fetchImpl), FULL, sid(7202)));
+    await quiet(() => runAndEnd(emailDeps(store, good.fetchImpl), FULL, sid(7202)));
     assert.equal(good.calls.length, 1);
   });
 
   it("missing RESEND_API_KEY -> failed (not sent), next lead not suppressed", async () => {
     const store = createMemoryChatStore();
     const r = recorder();
-    await quiet(() => runChat(emailDeps(store, r.fetchImpl, { CHAT_LEAD_ALERT_MODE: "email", CHAT_LEAD_ALERT_EMAIL_TO: "owner@example.com" }), FULL, sid(7301)));
+    await quiet(() => runAndEnd(emailDeps(store, r.fetchImpl, { CHAT_LEAD_ALERT_MODE: "email", CHAT_LEAD_ALERT_EMAIL_TO: "owner@example.com" }), FULL, sid(7301)));
     assert.equal(r.calls.length, 0);
     assert.equal(store.alerts[0]?.status, "failed");
-    await quiet(() => runChat(emailDeps(store, r.fetchImpl), FULL, sid(7302)));
+    await quiet(() => runAndEnd(emailDeps(store, r.fetchImpl), FULL, sid(7302)));
     assert.equal(r.calls.length, 1);
   });
 
-  it("a real sent alert still dedupes the same number within 24 h", async () => {
+  // LB-19 (8 Oct): the per-phone 24 h dedupe is gone - 1 chat = 1 email, returning customers included.
+  it("the same number in another chat within 24 h emails again (one per chat)", async () => {
     const store = createMemoryChatStore();
     const r = recorder();
     await quiet(async () => {
-      await runChat(emailDeps(store, r.fetchImpl), FULL, sid(7401));
-      await runChat(emailDeps(store, r.fetchImpl), FULL, sid(7402));
+      await runAndEnd(emailDeps(store, r.fetchImpl), FULL, sid(7401));
+      await runAndEnd(emailDeps(store, r.fetchImpl), FULL, sid(7402));
     });
-    assert.equal(r.calls.length, 1);
-    assert.equal(store.leads.get(sid(7402))?.alertStatus, "suppressed_duplicate");
+    assert.equal(r.calls.length, 2);
+    assert.equal(store.leads.get(sid(7402))?.alertStatus, "sent");
   });
 
   it("sendAlert throwing -> recorded as failed", async () => {
     const store = createMemoryChatStore();
-    await quiet(() =>
-      runChat(
-        { store, catalog: offlineCatalog(), sendAlert: async () => { throw new Error("boom"); } },
-        STOP_AFTER_NUMBER,
-        sid(7501),
-      ),
-    );
+    const deps = { store, catalog: offlineCatalog(), sendAlert: async () => { throw new Error("boom"); } };
+    await quiet(async () => {
+      await runChat(deps, STOP_AFTER_NUMBER, sid(7501));
+      await endChat(deps, sid(7501));
+    });
     assert.equal(store.alerts[0]?.status, "failed");
+    assert.equal([...store.chats.values()][0]!.emailStatus, "failed", "released for the digest, never 'sent'");
   });
 });

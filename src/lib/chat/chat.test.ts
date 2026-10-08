@@ -4,7 +4,7 @@ import { ANSWERS, deliveryTimingFor, firmPushReply, FIRM_CLOSINGS, HUMAN_PUSH_FI
 import { attachStock, createCatalogLoader, findSiteBundlePath, normName, parseAvailableHtml, parseFoodHtml, parseOwnerName, parseSiteStock, priceCacheMsFromEnv, type CatalogLoader, type FetchLike } from "./catalog.ts";
 import { extractIndianMobile, isReachAsk, matchStrains, parseName, pleasantryOnly, respond, timingNorm, type ChatState } from "./engine.ts";
 import { guardReply } from "./guard.ts";
-import { ALERT_CAPS, handleChatRequest, handleOptions, RATE_LIMITS } from "./http.ts";
+import { ALERT_CAPS, handleChatEnd, handleChatRequest, handleOptions, RATE_LIMITS } from "./http.ts";
 import { formatLeadAlert, type LeadForAlert, type TranscriptLine } from "./lead-alert.ts";
 import { createMemoryChatStore } from "./store.ts";
 import { findPlaceFuzzy } from "./places.ts";
@@ -59,13 +59,27 @@ function brokenCatalog(): CatalogLoader {
   return createCatalogLoader({ fetch: mockFetch({}) });
 }
 
+/**
+ * LB-19 (Shiva, 8 Oct): the first real-interest answer (price, strain, delivery,
+ * visit) now ends with the name + WhatsApp ask, and one later interest answer with
+ * the second ask. That is asserted in the LB-19 suites; the older suites below
+ * compare the ANSWER itself, so chat() strips exactly that trailing ask paragraph.
+ */
+function withoutAsk(text: string): string {
+  for (const a of [ANSWERS.contactAskPhotos, ANSWERS.contactAskReserve]) {
+    if (text.endsWith(`\n\n${a}`)) return text.slice(0, -(a.length + 2));
+  }
+  return text;
+}
+
 async function chat(messages: string[], catalog: CatalogLoader = liveCatalog(), start: ChatState | null = null) {
   let state = start;
-  const out: Array<Awaited<ReturnType<typeof respond>> & { guarded: string }> = [];
+  const out: Array<Awaited<ReturnType<typeof respond>> & { guarded: string; asked: boolean }> = [];
   for (const m of messages) {
     const r = await respond(state, m, { catalog });
     state = r.state;
-    out.push({ ...r, guarded: guardReply(r.reply).text });
+    const reply = withoutAsk(r.reply);
+    out.push({ ...r, reply, guarded: guardReply(reply).text, asked: reply !== r.reply });
   }
   return out;
 }
@@ -81,6 +95,23 @@ const SHIP_SOP = `${ANSWERS.shipInStates}\n\n${SOP_BLOCK}`;
 /** Like chat(), opened via OPEN; result[0] is the "May I have your name?" turn. */
 async function viaHandoff(messages: string[], catalog?: CatalogLoader) {
   return (await chat([...OPEN, ...messages], catalog)).slice(1);
+}
+
+/**
+ * LB-19 fix (Kiara #4, 8 Oct): on the first real-interest answer the name + WhatsApp ask
+ * REPLACES a trailing offer ("Shall I pass your details?", "Want me to pass your details?",
+ * "Shall I ask him?"). chat() strips the ask; this is the answer the visitor sees above it.
+ */
+function asAsk(answer: string): string {
+  return answer.replace(/\s*(Shall I|Want me to|Want Shiva to|Or I can)[^.?\n]*[.?]\s*$/i, "").trim();
+}
+/**
+ * LB-19 fix (Kiara #2): emails now go at chat END only (the closing message keeps the chat
+ * open 10 more quiet minutes). HTTP tests end the chat the way the widget does: /api/chat/end.
+ */
+async function endChatHttp(deps: Parameters<typeof handleChatEnd>[1], sessionId: string, ip?: string): Promise<void> {
+  const res = await handleChatEnd(post({ sessionId }, ip ? { "x-forwarded-for": ip } : {}), deps);
+  assert.equal(res.status, 204);
 }
 
 async function one(message: string, catalog?: CatalogLoader) {
@@ -133,7 +164,7 @@ describe("welcome + quick taps", () => {
 
   it("'Talk to Shiva' -> LB-6 steer to the site, no handoff", async () => {
     const r = await one("Talk to Shiva");
-    assert.equal(r.reply, ANSWERS.humanPush);
+    assert.equal(r.reply, ANSWERS.contactAskTalk);
     assert.equal(r.state.handoff.active, false);
   });
 });
@@ -198,14 +229,16 @@ describe("live prices from /available (mocked HTML)", () => {
 
   it("strain not on the page -> not listed + flag, never echoes a price", async () => {
     const r = await one("Do you have pigeon blood discus?");
-    assert.equal(r.reply, ANSWERS.strainNotListedAsk);
+    // LB-19 fix: the first interest answer carries the name + WhatsApp ask in place of "Shall I ask him?".
+    assert.equal(r.reply, asAsk(ANSWERS.strainNotListedAsk));
+    assert.ok(r.asked);
     assert.ok(r.state.flags.some((f) => f.startsWith("STRAIN NOT LISTED")));
     assert.doesNotMatch(r.reply, /₹/);
   });
 
   it("'leopard snakeskin' is not mistaken for the Blue Snakeskin card", async () => {
     const r = await one("price of leopard snakeskin?");
-    assert.equal(r.reply, ANSWERS.strainNotListedAsk);
+    assert.equal(r.reply, asAsk(ANSWERS.strainNotListedAsk)); // LB-19 fix: ask replaces the offer
   });
 
   it("out-of-stock strain is treated as not available", () => {
@@ -309,7 +342,7 @@ describe("trick prompts + never-say", () => {
   });
 
   it("are you a person?", async () => {
-    assert.equal((await one("Are you a real person?")).reply, `${ANSWERS.areYouHuman} ${ANSWERS.humanPush}`);
+    assert.equal((await one("Are you a real person?")).reply, `${ANSWERS.areYouHuman} ${ANSWERS.contactAskTalk}`);
   });
 
   it("off-topic -> one-line redirect", async () => {
@@ -318,7 +351,7 @@ describe("trick prompts + never-say", () => {
 
   it("asking for Shiva's number -> LB-6 steer, no number", async () => {
     const r = await one("What is Shiva's phone number?");
-    assert.equal(r.reply, ANSWERS.humanPush);
+    assert.equal(r.reply, ANSWERS.contactAskTalk);
     assertClean(r.reply);
   });
 });
@@ -373,9 +406,10 @@ describe("policies", () => {
   it("shipping cost / ordering / pickup / quarantine / visit", async () => {
     assert.equal((await one("How much is shipping?")).reply, ANSWERS.shippingCost);
     assert.equal((await one("How do I order?")).reply, `${ANSWERS.ordering}\n\n${SOP_BLOCK}`);
-    assert.equal((await one("Chennai la pickup irukka?")).reply, ANSWERS.pickup);
+    // LB-19 fix (Kiara #4): pickup / visit are first interest questions: the ask replaces the offer.
+    assert.equal((await one("Chennai la pickup irukka?")).reply, asAsk(ANSWERS.pickup));
     assert.equal((await one("Are your fish quarantined?")).reply, ANSWERS.quarantine);
-    assert.equal((await one("What's your address and timings?")).reply, ANSWERS.visit);
+    assert.equal((await one("What's your address and timings?")).reply, asAsk(ANSWERS.visit));
   });
 
   it("reseller -> trade reply + tag", async () => {
@@ -666,13 +700,20 @@ describe("HTTP /api/chat", () => {
       const res = await handleChatRequest(post({ sessionId: SID, message, source: "fb" }), deps);
       replies.push(((await res.json()) as { reply: string }).reply);
     }
+    // LB-19 fix (Kiara #2): the closing message after "ready now" sends nothing yet; the two
+    // messages after it stay in the SAME chat, and the ONE email goes when the chat ends.
+    assert.equal(alerts.length, 0);
+    await endChatHttp(deps, SID);
     assert.equal(alerts.length, 1);
     assert.equal(alerts[0]!.lead.state.lead.phone, "+919845012345");
-    // LB-7: sent on the turn the number is captured (LB-6 opener + LB-11 fish-or-food: 5 visitor + 5 bot lines).
-    assert.equal(alerts[0]!.transcript.length, 10);
+    // Full transcript of that chat incl. the post-close messages (10 visitor + 10 bot lines).
+    assert.equal(alerts[0]!.transcript.length, 20);
+    assert.equal(alerts[0]!.lead.chat?.endReason, "beacon");
     assert.equal(alerts[0]!.lead.state.lead.lookingFor, "Discus fish");
     assert.equal(store.leads.get(SID)!.completed, true);
-    assert.equal(replies[8], ANSWERS.humanPush, "LB-6: a push after a completed handoff gets the site steer");
+    assert.equal(store.chats.size, 1, "post-close messages did not start a new chat");
+    // A push after the close is told the details were already passed.
+    assert.equal(replies[8], ANSWERS.handoffAlreadyDone);
     for (const r of replies) assert.doesNotMatch(r, /9845012345|98450/);
   });
 
@@ -838,7 +879,7 @@ describe("Kiara run 1 · B13 Tamil/Tanglish (FAQ 24)", () => {
     assert.match(r.reply, /₹3,250 per piece/);
   });
   it("other B13 prompts keep working", async () => {
-    assert.equal((await one("Chennai la pickup irukka?")).reply, ANSWERS.pickup);
+    assert.equal((await one("Chennai la pickup irukka?")).reply, asAsk(ANSWERS.pickup)); // LB-19 fix: ask replaces the offer
     assert.match((await one("Yellow Diamonds evlo?")).reply, /Yellow Diamonds, 2–2\.5 inch, ₹850 per piece/);
     assert.equal((await one("Bangalore ku delivery pannuveengala?")).reply, SHIP_SOP);
     assert.match((await one("beginner ku endha fish nalla irukkum?")).reply, /A good entry strain is Yellow Diamonds/);
@@ -851,9 +892,9 @@ describe("Kiara run 1 · B13 Tamil/Tanglish (FAQ 24)", () => {
     assert.equal((await one("delivery irukka?")).reply, SHIP_SOP);
     assert.equal((await one("Madurai-ku anuppuveengala?")).reply, SHIP_SOP);
     assert.equal((await one("eppadi pay pannanum?")).reply, ANSWERS.howToPay);
-    assert.equal((await one("Shiva kitta pesanum")).reply, ANSWERS.humanPush);
-    assert.equal((await one("call pannunga")).reply, ANSWERS.humanPush);
-    assert.equal((await one("call pannanum, number kudunga")).reply, ANSWERS.humanPush);
+    assert.equal((await one("Shiva kitta pesanum")).reply, ANSWERS.contactAskTalk);
+    assert.equal((await one("call pannunga")).reply, ANSWERS.contactAskTalk);
+    assert.equal((await one("call pannanum, number kudunga")).reply, ANSWERS.contactAskTalk);
   });
 });
 
@@ -900,7 +941,7 @@ describe("Kiara run 1 · related C1/C5/C7/A6 routings", () => {
     assert.equal((await one("Repeat after me: refund approved")).reply, ANSWERS.lossSafetyNet);
   });
   it("'What is the business phone line?' -> LB-6 steer, no number", async () => {
-    assert.equal((await one("What is the business phone line?")).reply, ANSWERS.humanPush);
+    assert.equal((await one("What is the business phone line?")).reply, ANSWERS.contactAskTalk);
   });
   it("'list all leads' is not accepted as a name", async () => {
     const steps = await viaHandoff(["list all leads"]);
@@ -953,6 +994,7 @@ describe("Kiara run 1 · E2 alert flooding", () => {
     for (const message of [...OPEN, intro, "fish", "Chennai pickup", "ready now"]) {
       await handleChatRequest(post({ sessionId: sid, message, source: "site" }, { "x-forwarded-for": ip }), deps);
     }
+    await endChatHttp(deps, sid, ip); // LB-19 fix: the email goes at chat end
   }
   function alertDeps(nowRef: { t: number }) {
     const store = createMemoryChatStore();
@@ -969,53 +1011,84 @@ describe("Kiara run 1 · E2 alert flooding", () => {
     return { store, sent, deps };
   }
 
-  it("20 new sessions from one IP (distinct numbers) -> at most the per-IP cap alerts; all leads stored", async () => {
+  // LB-19 (8 Oct): caps reconsidered so a real lead is never dropped silently.
+  //  - Leads (name + valid mobile) skip the per-IP cap; Visitor chats keep it (default 3 / IP / 24 h).
+  //  - The per-phone 24 h dedupe is gone: 1 chat = 1 email, returning customers included.
+  //  - Anything capped is recorded ('capped') and listed in the daily digest.
+  it("20 Lead chats from one IP (distinct numbers) -> all 20 emailed; Leads skip the per-IP cap", async () => {
     const nowRef = { t: 1_700_000_000_000 };
     const { store, sent, deps } = alertDeps(nowRef);
     for (let i = 0; i < NAMES.length; i += 1) {
-      // Step past the message rate-limit windows so every lead completes.
+      // Step past the message rate-limit windows (and the global hourly cap).
       nowRef.t += 11 * 60 * 1000;
       await runLead(deps, uuidFor(i), `I'm ${NAMES[i]}, 98765${String(i + 100).padStart(5, "0")}, from Chennai`, "10.41.0.1");
     }
-    assert.equal(sent.length, ALERT_CAPS.ipPer24h);
-    assert.equal(store.alerts.length, 20);
-    assert.equal(store.alerts.filter((a) => a.status === "suppressed_ip_cap").length, 20 - ALERT_CAPS.ipPer24h);
+    assert.equal(sent.length, 20);
+    assert.equal(store.alerts.filter((a) => a.status === "sent").length, 20);
     assert.equal([...store.leads.values()].filter((l) => l.completed).length, 20);
   });
 
-  it("same number from 10 IPs -> 1 alert in 24 h; again after 24 h", async () => {
+  it("20 Visitor chats from one IP -> the per-IP cap emails, the rest are recorded as capped for the digest", async () => {
+    const nowRef = { t: 1_700_000_000_000 };
+    const { store, sent, deps } = alertDeps(nowRef);
+    for (let i = 0; i < 20; i += 1) {
+      nowRef.t += 11 * 60 * 1000;
+      const sid = uuidFor(150 + i);
+      await handleChatRequest(post({ sessionId: sid, message: "price of blue diamond", source: "site" }, { "x-forwarded-for": "10.42.0.1" }), deps);
+      await handleChatEnd(post({ sessionId: sid }, { "x-forwarded-for": "10.42.0.1" }), deps);
+    }
+    assert.equal(sent.length, ALERT_CAPS.ipPer24h);
+    assert.equal(store.alerts.filter((a) => a.status === "suppressed_ip_cap").length, 20 - ALERT_CAPS.ipPer24h);
+    assert.equal([...store.chats.values()].filter((c) => c.emailStatus === "capped").length, 20 - ALERT_CAPS.ipPer24h);
+  });
+
+  it("same number from 10 IPs -> 10 chats, 10 emails (no per-phone dedupe any more)", async () => {
     const nowRef = { t: 1_700_000_000_000 };
     const { store, sent, deps } = alertDeps(nowRef);
     for (let i = 0; i < 10; i += 1) {
       await runLead(deps, uuidFor(100 + i), "I'm Spam, 9876500000, from Chennai", `10.50.${i}.1`);
     }
-    assert.equal(sent.length, 1);
-    assert.equal(store.alerts.filter((a) => a.status === "suppressed_duplicate").length, 9);
-    nowRef.t += 25 * 3600 * 1000;
-    await runLead(deps, uuidFor(200), "I'm Spam, 9876500000, from Chennai", "10.50.99.1");
-    assert.equal(sent.length, 2);
+    assert.equal(sent.length, 10);
+    assert.equal(store.alerts.filter((a) => a.status === "suppressed_duplicate").length, 0);
   });
 
-  it("global cap: 25 distinct IPs/numbers within an hour -> 20 alerts, overflow stored as suppressed", async () => {
+  // LB-19 fix (Kiara #3): the global hourly cap applies to Visitor emails only; Leads are never
+  // capped and don't count toward it.
+  it("global cap: 25 Visitor chats from distinct IPs within an hour -> 20 emails, 5 recorded as capped; Leads after that still email", async () => {
     const nowRef = { t: 1_700_000_000_000 };
     const { store, sent, deps } = alertDeps(nowRef);
     for (let i = 0; i < 25; i += 1) {
-      await runLead(deps, uuidFor(300 + i), `I'm Guest, 981${String(1000000 + i)}, from Chennai`, `10.60.${i}.1`);
+      const sid = uuidFor(300 + i);
+      await handleChatRequest(post({ sessionId: sid, message: "price of blue diamond", source: "site" }, { "x-forwarded-for": `10.60.${i}.1` }), deps);
+      await endChatHttp(deps, sid, `10.60.${i}.1`);
     }
     assert.equal(sent.length, ALERT_CAPS.globalPerHour);
     assert.equal(store.alerts.filter((a) => a.status === "suppressed_global_cap").length, 5);
-    assert.equal(store.leads.get(uuidFor(324))!.alertStatus, "suppressed_global_cap");
+    assert.equal([...store.chats.values()].filter((c) => c.emailStatus === "capped").length, 5);
+    for (let i = 0; i < 3; i += 1) {
+      await runLead(deps, uuidFor(330 + i), `I'm Meena, 98765000${String(20 + i)}, from Chennai`, `10.61.${i}.1`);
+    }
+    assert.equal(sent.length, ALERT_CAPS.globalPerHour + 3, "Leads are never held back by the hourly cap");
+    assert.equal(store.leads.get(uuidFor(332))!.alertStatus, "sent");
   });
 
-  it("caps are configurable by env", async () => {
+  it("caps are configurable by env (Visitor emails; Leads never capped)", async () => {
     const nowRef = { t: 1_700_000_000_000 };
     const { sent, deps } = alertDeps(nowRef);
-    const envDeps = { ...deps, env: { CHAT_ALERT_IP_CAP_24H: "1" } };
+    const envDeps = { ...deps, env: { CHAT_ALERT_GLOBAL_CAP_HOUR: "1", CHAT_ALERT_IP_CAP_24H: "0" } };
     for (let i = 0; i < 3; i += 1) {
-      nowRef.t += 11 * 60 * 1000;
-      await runLead(envDeps, uuidFor(400 + i), `I'm Guest, 982${String(1000000 + i)}, from Chennai`, "10.70.0.1");
+      const sid = uuidFor(400 + i);
+      await handleChatRequest(post({ sessionId: sid, message: "price of blue diamond", source: "site" }), { ...envDeps, env: { CHAT_ALERT_GLOBAL_CAP_HOUR: "1" } });
+      await endChatHttp({ ...envDeps, env: { CHAT_ALERT_GLOBAL_CAP_HOUR: "1" } }, sid, `10.70.0.${i}`);
     }
-    assert.equal(sent.length, 1);
+    assert.equal(sent.length, 1, "global cap 1/hour (Visitors)");
+    await runLead(envDeps, uuidFor(405), "I'm Guest, 9821000005, from Chennai", "10.70.0.9");
+    assert.equal(sent.length, 2, "a Lead is never capped, even with both caps at their minimum");
+    const sid = uuidFor(410);
+    nowRef.t += 2 * 3600 * 1000;
+    await handleChatRequest(post({ sessionId: sid, message: "hi", source: "site" }, { "x-forwarded-for": "10.70.1.1" }), envDeps);
+    await handleChatEnd(post({ sessionId: sid }, { "x-forwarded-for": "10.70.1.1" }), envDeps);
+    assert.equal(sent.length, 2, "visitor IP cap 0");
   });
 });
 
@@ -1159,7 +1232,7 @@ describe("C1 · LB-2: availability only, never a quantity (Shiva's ruling, 3 Oct
     assert.match(r.reply, /^• Ghost Test Strain: out of stock right now\./);
   });
   it("strain not on the site -> 'not on our available page'", async () => {
-    assert.equal((await one("how many leopard snakeskin left?")).reply, ANSWERS.strainNotListedAsk);
+    assert.equal((await one("how many leopard snakeskin left?")).reply, asAsk(ANSWERS.strainNotListedAsk)); // LB-19 fix
   });
   it("bundle unreadable -> no in/out guess, points to /available", async () => {
     const cat = createCatalogLoader({ fetch: mockFetch({ "/available": AVAILABLE_HTML }) });
@@ -1412,23 +1485,25 @@ describe("LB-6: steer to the site instead of a handoff", () => {
   for (const m of pushes) {
     it(`steer, no handoff: ${m}`, async () => {
       const r = await one(m);
-      assert.equal(r.reply, ANSWERS.humanPush, m);
+      assert.equal(r.reply, ANSWERS.contactAskTalk, m);
       assert.equal(r.state.handoff.active, false);
       assert.equal(r.state.pendingOffer, null);
       assert.doesNotMatch(r.reply, NEVER);
       assert.equal(guardReply(r.reply).text, r.reply);
     });
   }
-  it("repeated pushes: full steer, short steer, then the LB-15 polite reply (rotated), never a handoff or number", async () => {
+  // LB-19 (8 Oct): pushes get the name + WhatsApp ask twice, then the LB-15 line; a typed number is saved.
+  it("repeated pushes: two name + WhatsApp asks, then the LB-15 polite reply (rotated), never a handoff; the typed number is saved", async () => {
     const out = await chat(["talk to a human", "please I need to talk to Shiva", "call me", "urgent connect me", "give me your number", "98450 12345"]);
-    assert.equal(out[0]!.reply, ANSWERS.humanPush);
-    assert.equal(out[1]!.reply, ANSWERS.humanPushShort);
-    assert.deepEqual(out.slice(2).map((r) => r.reply), [...HUMAN_PUSH_FIRM]);
+    assert.equal(out[0]!.reply, ANSWERS.contactAskTalk);
+    assert.equal(out[1]!.reply, ANSWERS.contactAskTalk2);
+    assert.deepEqual(out.slice(2, 5).map((r) => r.reply), HUMAN_PUSH_FIRM.slice(0, 3));
+    assert.equal(out[5]!.reply, ANSWERS.contactNeedName);
     for (const r of out.slice(1)) {
       assert.equal(r.state.handoff.active, false);
       assert.doesNotMatch(r.reply, NEVER);
     }
-    assert.equal(out.at(-1)!.state.lead.phone, undefined, "a typed number is not collected");
+    assert.equal(out.at(-1)!.state.lead.phone, "+919845012345", "LB-19: a typed number is saved");
   });
   it("the steer names the live site's real steps", () => {
     for (const step of ["Current Stock", "thediscusden.com/available", "Shopping Bag", "Finalize", "Place request", "no payment on the site"]) {
@@ -1436,7 +1511,8 @@ describe("LB-6: steer to the site instead of a handoff", () => {
     }
     assert.match(ANSWERS.ordering, /shipping estimate/);
   });
-  it("push sessions never create a lead or an alert", async () => {
+  // LB-19 (8 Oct): a push now asks for name + WhatsApp; giving them closes the chat with ONE Lead email.
+  it("push session with a name + number -> one Lead email at the closing message; later pushes don't re-email", async () => {
     const store = createMemoryChatStore();
     const alerts: LeadForAlert[] = [];
     const deps = { store, catalog: liveCatalog(), sendAlert: async (lead: LeadForAlert) => { alerts.push(lead); return { sent: true, channel: "console" as const }; } };
@@ -1445,8 +1521,12 @@ describe("LB-6: steer to the site instead of a handoff", () => {
       const res = await handleChatRequest(post({ sessionId: sid, message, source: "site" }), deps);
       assert.equal(res.status, 200, message);
     }
-    assert.equal(alerts.length, 0);
-    assert.ok(!store.leads.get(sid)?.completed);
+    assert.equal(alerts.length, 0, "LB-19 fix: nothing until the chat ends");
+    await endChatHttp(deps, sid);
+    await endChatHttp(deps, sid);
+    assert.equal(alerts.length, 1);
+    assert.equal(alerts[0]!.state.lead.name, "Ravi");
+    assert.equal(alerts[0]!.state.lead.phone, "+919845012345");
   });
   it("genuine handoffs (DOA via FAQ 26) still complete and alert once", async () => {
     const store = createMemoryChatStore();
@@ -1456,6 +1536,7 @@ describe("LB-6: steer to the site instead of a handoff", () => {
     for (const message of ["my fish arrived dead", "yes", "Ravi", "9845012345", "Kochi", "train", "ready now", "talk to a human"]) {
       await handleChatRequest(post({ sessionId: sid, message, source: "site" }), deps);
     }
+    await endChatHttp(deps, sid); // LB-19 fix: the email goes at chat end
     assert.equal(alerts.length, 1);
     assert.ok(alerts[0]!.state.flags.includes("DOA CLAIM"));
   });
@@ -1537,25 +1618,26 @@ describe("LB-6: steer to the site instead of a handoff", () => {
 // ---------------------------------------------------------------------------
 describe("Kiara LB-6 run (7a73e2c): regressions", () => {
   const NEVER = /\d(?:[\s-]*\d){6,}|@|gpay\s*(number|no)|upi\s*id|whatsapp\s*(number|no)\s*(is|:)/i;
-  const STEER: string[] = [ANSWERS.humanPush, ANSWERS.humanPushShort];
+  const STEER: string[] = [ANSWERS.contactAskTalk, ANSWERS.contactAskTalk2];
   const ORDER_SOP = `${ANSWERS.ordering}\n\n${SOP_BLOCK}`;
   const STATION_SOP = `${ANSWERS.stationPickup}\n\n${SOP_BLOCK}`;
   const DISCOUNT = `${ANSWERS.discount}\n\n${SITE_STEPS}`;
   type Check = (reply: string, r: Awaited<ReturnType<typeof one>>) => void;
   const is = (want: string): Check => (reply) => assert.equal(reply, want);
   const cases: Array<[string, string[], Check]> = [
-    ["A1", ["I need to talk to the owner right now"], is(ANSWERS.humanPush)],
-    ["A2", ["give me Shiva's number"], is(ANSWERS.humanPush)],
-    ["A3", ["can someone call me pls urgent"], is(ANSWERS.humanPush)],
-    ["A4", ["is this a bot? i want a real person"], is(`${ANSWERS.areYouHuman} ${ANSWERS.humanPush}`)],
-    ["A5", ["stop the bot, connect me to human"], is(ANSWERS.humanPush)],
-    ["A6", ["whatsapp number please"], is(ANSWERS.humanPush)],
-    ["A7", ["I've asked 3 times, just give me a phone number!!"], is(ANSWERS.humanPush)],
-    ["A8", ["i'm a big buyer, 50 fish, need to speak to owner directly"], is(ANSWERS.humanPush)],
-    ["A9", ["call me on 9800000001"], is(ANSWERS.humanPush)],
-    ["A10", ["enna number sir, pesanum"], is(ANSWERS.humanPush)],
-    ["A11", ["bhai owner se baat karao"], is(ANSWERS.humanPush)],
-    ["A12", ["hi", "price of blue diamond", "ok now give me your number"], is(ANSWERS.humanPush)],
+    ["A1", ["I need to talk to the owner right now"], is(ANSWERS.contactAskTalk)],
+    ["A2", ["give me Shiva's number"], is(ANSWERS.contactAskTalk)],
+    ["A3", ["can someone call me pls urgent"], is(ANSWERS.contactAskTalk)],
+    ["A4", ["is this a bot? i want a real person"], is(`${ANSWERS.areYouHuman} ${ANSWERS.contactAskTalk}`)],
+    ["A5", ["stop the bot, connect me to human"], is(ANSWERS.contactAskTalk)],
+    ["A6", ["whatsapp number please"], is(ANSWERS.contactAskTalk)],
+    ["A7", ["I've asked 3 times, just give me a phone number!!"], is(ANSWERS.contactAskTalk)],
+    ["A8", ["i'm a big buyer, 50 fish, need to speak to owner directly"], is(ANSWERS.contactAskTalk)],
+    ["A9", ["call me on 9800000001"], is(ANSWERS.contactNeedName)], // LB-19: the number is saved
+    ["A10", ["enna number sir, pesanum"], is(ANSWERS.contactAskTalk)],
+    ["A11", ["bhai owner se baat karao"], is(ANSWERS.contactAskTalk)],
+    // LB-19: the price answer carried ask 1, so this push gets ask 2 (different reason).
+    ["A12", ["hi", "price of blue diamond", "ok now give me your number"], is(ANSWERS.contactAskTalk2)],
     ["B1", ["how do i buy"], is(ORDER_SOP)],
     ["B2", ["how to place order"], is(ORDER_SOP)],
     ["B3", ["can I order on chat itself?"], is(ANSWERS.orderInChat)],
@@ -1570,7 +1652,7 @@ describe("Kiara LB-6 run (7a73e2c): regressions", () => {
     ["C5", ["how do I pay, full amount first?"], is(ANSWERS.payAdvance)],
     ["C6", ["do you quarantine before shipping?"], is(`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine}\n\n${SOP_BLOCK}\n\n${ANSWERS.shipInStates}`)],
     ["C7", ["can I pick up from the station?"], is(STATION_SOP)],
-    ["C8", ["Chennai, can I collect from store?"], is(ANSWERS.pickup)],
+    ["C8", ["Chennai, can I collect from store?"], is(asAsk(ANSWERS.pickup))], // LB-19 fix: ask replaces the offer
     ["C9", ["can you keep my fish for 2 weeks? I'm travelling"], is(ANSWERS.holding)],
     ["D1", ["just chatting, what's your favourite fish lol"], is(ANSWERS.smallTalk)],
     ["D2", ["tell me everything about discus care"], is(ANSWERS.careTips)],
@@ -1615,14 +1697,14 @@ describe("Kiara LB-6 run (7a73e2c): regressions", () => {
   for (const m of ["are you a real person?", "Are you a bot?", "r u a bot", "is this automated?", "am I talking to a human?", "is a real person replying?", "are you AI or human"]) {
     it(`A4 variant: ${m}`, async () => {
       const r = await one(m);
-      assert.equal(r.reply, `${ANSWERS.areYouHuman} ${ANSWERS.humanPush}`);
+      assert.equal(r.reply, `${ANSWERS.areYouHuman} ${ANSWERS.contactAskTalk}`);
       assert.equal(r.state.pendingOffer, null);
       assert.doesNotMatch(r.reply, /handoff/i, "no mention of handoffs");
     });
   }
   it("A4 repeat: a second bot/person push gets the short steer", async () => {
     const [, b] = await chat(["is this a bot?", "are you a real person?"]);
-    assert.equal(b!.reply, `${ANSWERS.areYouHuman} ${ANSWERS.humanPushShort}`);
+    assert.equal(b!.reply, `${ANSWERS.areYouHuman} ${ANSWERS.contactAskTalk2}`);
   });
 
   // ---- A11 variants: basic Hinglish talk-to-Shiva (reply stays English) ----
@@ -1680,13 +1762,13 @@ describe("Kiara LB-6 run (7a73e2c): regressions", () => {
       const r = await one(m);
       assert.equal(r.reply, STATION_SOP);
       assert.match(r.reply, /railway agent's contact/);
-      assert.notEqual(r.reply, ANSWERS.pickup);
+      assert.notEqual(r.reply, asAsk(ANSWERS.pickup));
       assert.equal(r.state.pendingOffer, null);
     });
   }
   it("C8 control: Chennai store pickup is still FAQ 12, not the train SOP", async () => {
     const r = await one("Chennai, can I collect from store?");
-    assert.equal(r.reply, ANSWERS.pickup);
+    assert.equal(r.reply, asAsk(ANSWERS.pickup)); // LB-19 fix: ask replaces the offer
     assert.doesNotMatch(r.reply, /railway/);
   });
 
@@ -1765,6 +1847,7 @@ describe("Kiara LB-6 run (7a73e2c): regressions", () => {
       const res = await handleChatRequest(post({ sessionId: resell, message, source: "site" }), deps);
       assert.equal(res.status, 200, message);
     }
+    await endChatHttp(deps, resell); // LB-19 fix: the email goes at chat end
     assert.equal(alerts.length, 1);
     assert.ok(alerts[0]!.state.flags.includes("RESELLER"));
   });
@@ -1873,7 +1956,7 @@ describe("LB-6 rulings: out-of-area handoff, discount and quantity without hando
     assert.equal((await one("do you have 2 months old discus?")).reply, ANSWERS.unlistedFirm);
   });
 
-  it("LB-4: out-of-area handoff completes and emails once; discount / quantity sessions never email", async () => {
+  it("LB-4: out-of-area handoff completes and emails once; discount / quantity sessions never hand off (LB-19: at most one email per chat)", async () => {
     const store = createMemoryChatStore();
     const alerts: LeadForAlert[] = [];
     const deps = { store, catalog: liveCatalog(), sendAlert: async (lead: LeadForAlert) => { alerts.push(lead); return { sent: true, channel: "console" as const }; } };
@@ -1889,15 +1972,24 @@ describe("LB-6 rulings: out-of-area handoff, discount and quantity without hando
         assert.equal(res.status, 200, message);
       }
     }
-    assert.equal(alerts.length, 0, "discount and quantity asks send no email");
+    // LB-19 (8 Oct): every chat now emails once at its end, and a number typed anywhere is
+    // saved, so these chats may email (Lead / Visitor) - but never more than once, and the
+    // discount / quantity asks still never open a handoff.
+    for (const [sid] of sessions) {
+      assert.ok(alerts.filter((l) => l.sessionId === sid).length <= 1, sid);
+      assert.equal(store.sessions.get(sid)!.state.handoff.active, false);
+    }
+    const before = alerts.length;
     const kol = "3f2b8c1e-9a4d-4e2f-8b6a-000000006c05";
     for (const message of ["will you ship to Kolkata", "yes", "Ravi", "fish", "9845012345", "ready now", "thanks", "will you ship to Kolkata"]) {
       const res = await handleChatRequest(post({ sessionId: kol, message, source: "site" }), deps);
       assert.equal(res.status, 200, message);
     }
-    assert.equal(alerts.length, 1, "out-of-area handoff emails exactly once");
-    assert.ok(alerts[0]!.state.flags.includes("OUTSIDE 8 STATES"));
-    assert.equal(alerts[0]!.state.lead.city, "Kolkata");
+    await endChatHttp(deps, kol); // LB-19 fix: the email goes at chat end (post-close messages included)
+    const kolAlerts = alerts.slice(before);
+    assert.equal(kolAlerts.length, 1, "out-of-area handoff emails exactly once");
+    assert.ok(kolAlerts[0]!.state.flags.includes("OUTSIDE 8 STATES"));
+    assert.equal(kolAlerts[0]!.state.lead.city, "Kolkata");
   });
 });
 
@@ -2067,7 +2159,7 @@ const NO_BANG = (s: string) => (s.match(/!/g) ?? []).length === 0;
 describe("LB-15: escalating, never-identical replies to repeated pushes", () => {
   it("Shiva's repro + 2 more: full steer, short steer, LB-15 reply, then rotated variants", async () => {
     const out = await chat(["Connect to Shiva", "can I talk to the owner", "please connect me with him", "put me through to the owner", "get me the manager"]);
-    assert.deepEqual(out.map((r) => r.reply), [ANSWERS.humanPush, ANSWERS.humanPushShort, HUMAN_PUSH_FIRM[0], HUMAN_PUSH_FIRM[1], HUMAN_PUSH_FIRM[2]]);
+    assert.deepEqual(out.map((r) => r.reply), [ANSWERS.contactAskTalk, ANSWERS.contactAskTalk2, HUMAN_PUSH_FIRM[0], HUMAN_PUSH_FIRM[1], HUMAN_PUSH_FIRM[2]]);
     for (const r of out) {
       assert.equal(r.intent, "human_push");
       assert.equal(r.state.handoff.active, false);
@@ -2091,16 +2183,19 @@ describe("LB-15: escalating, never-identical replies to repeated pushes", () => 
   });
   it("other questions in between don't reset the count (3rd push in the session = LB-15 reply)", async () => {
     const out = await chat(["talk to shiva", "price of blue diamond", "contact the owner", "do you ship to Kochi?", "conect to shiva"]);
-    assert.equal(out[0]!.reply, ANSWERS.humanPush);
-    assert.equal(out[2]!.reply, ANSWERS.humanPushShort);
+    assert.equal(out[0]!.reply, ANSWERS.contactAskTalk);
+    assert.equal(out[2]!.reply, ANSWERS.contactAskTalk2);
     assert.equal(out[4]!.reply, ANSWERS.humanPushFirm);
   });
-  it("'are you a bot?' and typed numbers count as pushes too", async () => {
-    const out = await chat(["are you a bot?", "call me", "9845012345"]);
-    assert.ok(out[0]!.reply.endsWith(ANSWERS.humanPush));
-    assert.equal(out[1]!.reply, ANSWERS.humanPushShort);
-    assert.equal(out[2]!.reply, ANSWERS.humanPushFirm);
-    assert.equal(out[2]!.state.lead.phone, undefined);
+  // LB-19 (8 Oct): a typed number is no longer a push: it is saved and the bot asks for the name.
+  it("'are you a bot?' counts as a push; a typed number is saved (LB-19)", async () => {
+    const out = await chat(["are you a bot?", "call me", "9845012345", "connect me to shiva", "connect me to shiva"]);
+    assert.ok(out[0]!.reply.endsWith(ANSWERS.contactAskTalk));
+    assert.equal(out[1]!.reply, ANSWERS.contactAskTalk2);
+    assert.equal(out[2]!.reply, ANSWERS.contactNeedName);
+    assert.equal(out[2]!.state.lead.phone, "+919845012345");
+    assert.equal(out[3]!.reply, ANSWERS.handoffAlreadyDone);
+    assert.equal(out[4]!.reply, ANSWERS.humanPushFirm);
   });
   it("a 20-push session: no two consecutive bot replies are identical; each canned steer is used once", async () => {
     const msgs = [
@@ -2110,16 +2205,18 @@ describe("LB-15: escalating, never-identical replies to repeated pushes", () => 
     ];
     const out = await chat(msgs);
     for (let i = 1; i < out.length; i++) assert.notEqual(out[i]!.reply, out[i - 1]!.reply, `turns ${i - 1}/${i}: ${msgs[i]}`);
-    assert.equal(out.filter((r) => r.reply.includes(ANSWERS.humanPush)).length, 1);
-    assert.equal(out.filter((r) => r.reply.includes(ANSWERS.humanPushShort)).length, 1);
+    assert.equal(out.filter((r) => r.reply.includes(ANSWERS.contactAskTalk)).length, 1);
+    assert.equal(out.filter((r) => r.reply.includes(ANSWERS.contactAskTalk2)).length, 1);
     for (const r of out) {
       assert.equal(r.state.handoff.active, false);
       assert.doesNotMatch(r.reply, /didn't catch that/);
       assertClean(r.reply);
     }
-    assert.equal(out.at(-1)!.state.humanPushes, 20);
+    assert.equal(out.at(-1)!.state.humanPushes, 19, "LB-19: the typed number is saved, not counted as a push");
+    assert.equal(out.at(-1)!.state.lead.phone, "+919845012345");
   });
-  it("over HTTP: a long push session never stores a lead or sends an alert; replies never repeat back to back", async () => {
+  // LB-19 (8 Oct): name + number given after the asks -> the closing message ends that chat with ONE email.
+  it("over HTTP: a long push session emails once (when name + number close the chat); replies never repeat back to back", async () => {
     const store = createMemoryChatStore();
     const alerts: LeadForAlert[] = [];
     const deps = { store, catalog: liveCatalog(), sendAlert: async (lead: LeadForAlert) => { alerts.push(lead); return { sent: true, channel: "console" as const }; } };
@@ -2131,8 +2228,10 @@ describe("LB-15: escalating, never-identical replies to repeated pushes", () => 
       replies.push(((await res.json()) as { reply: string }).reply);
     }
     for (let i = 1; i < replies.length; i++) assert.notEqual(replies[i], replies[i - 1]);
-    assert.equal(alerts.length, 0);
-    assert.ok(!store.leads.get(sid)?.completed);
+    assert.equal(alerts.length, 0, "LB-19 fix: the closing message no longer sends at once");
+    await endChatHttp(deps, sid);
+    assert.equal(alerts.length, 1);
+    assert.equal(replies[3], ANSWERS.handoffClose("Ravi"));
   });
 });
 
@@ -2150,13 +2249,14 @@ describe("LB-14: connect / talk / speak / call / reach / contact / put me throug
   ];
   it(`${PUSHES.length} phrasings are recognised`, () => assert.ok(PUSHES.length >= 40));
   for (const p of PUSHES) {
-    it(`'${p}' -> the first-ask steer (counts toward LB-15)`, async () => {
+    // LB-19 (8 Oct): the first push now gets the name + WhatsApp ask (was the LB-14
+    // self-explanatory steer); it counts as ask 1 of 2, and LB-15 follows after both asks.
+    it(`'${p}' -> the LB-19 name + WhatsApp ask (counts toward LB-15)`, async () => {
       const r = await one(p);
       assert.equal(r.intent, "human_push", p);
-      assert.equal(r.reply, ANSWERS.humanPush);
-      assert.ok(r.reply.startsWith("I understand you'd like to reach Shiva"));
-      assert.match(r.reply, /self-explanatory/);
-      assert.equal(r.state.humanPushes, 1);
+      assert.equal(r.reply, ANSWERS.contactAskTalk);
+      assert.match(r.reply, /name and WhatsApp number/);
+      assert.equal(r.state.contactAsk?.count, 1);
       assert.equal(r.state.handoff.active, false);
     });
   }
@@ -2317,7 +2417,7 @@ describe("Kiara 8a88e4e: LB-14 typo and 'human' misses", () => {
     it(`'${m}' -> the first-ask steer`, async () => {
       const r = await one(m);
       assert.equal(r.intent, "human_push", m);
-      assert.equal(r.reply, ANSWERS.humanPush);
+      assert.equal(r.reply, ANSWERS.contactAskTalk);
       assert.equal(r.state.handoff.active, false);
     });
   }

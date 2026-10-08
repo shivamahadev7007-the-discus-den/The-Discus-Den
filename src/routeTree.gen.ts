@@ -26,6 +26,8 @@ import { Route as BooksPurchasesRouteImport } from './routes/books/purchases'
 import { Route as BooksSalesRouteImport } from './routes/books/sales'
 import { Route as BooksStockRouteImport } from './routes/books/stock'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiChatCronRouteImport } from './routes/api/chat/cron'
+import { Route as ApiChatEndRouteImport } from './routes/api/chat/end'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -112,6 +114,16 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiChatCronRoute = ApiChatCronRouteImport.update({
+  id: '/cron',
+  path: '/cron',
+  getParentRoute: () => ApiChatRoute,
+} as any)
+const ApiChatEndRoute = ApiChatEndRouteImport.update({
+  id: '/end',
+  path: '/end',
+  getParentRoute: () => ApiChatRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -124,13 +136,15 @@ export interface FileRoutesByFullPath {
   '/sales': typeof SalesRoute
   '/ship': typeof ShipRoute
   '/stock': typeof StockRoute
-  '/api/chat': typeof ApiChatRoute
+  '/api/chat': typeof ApiChatRouteWithChildren
   '/api/whatsapp': typeof ApiWhatsappRoute
   '/books/purchases': typeof BooksPurchasesRoute
   '/books/sales': typeof BooksSalesRoute
   '/books/stock': typeof BooksStockRoute
   '/books/': typeof BooksIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chat/cron': typeof ApiChatCronRoute
+  '/api/chat/end': typeof ApiChatEndRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -143,13 +157,15 @@ export interface FileRoutesByTo {
   '/sales': typeof SalesRoute
   '/ship': typeof ShipRoute
   '/stock': typeof StockRoute
-  '/api/chat': typeof ApiChatRoute
+  '/api/chat': typeof ApiChatRouteWithChildren
   '/api/whatsapp': typeof ApiWhatsappRoute
   '/books/purchases': typeof BooksPurchasesRoute
   '/books/sales': typeof BooksSalesRoute
   '/books/stock': typeof BooksStockRoute
   '/books': typeof BooksIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chat/cron': typeof ApiChatCronRoute
+  '/api/chat/end': typeof ApiChatEndRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -163,13 +179,15 @@ export interface FileRoutesById {
   '/sales': typeof SalesRoute
   '/ship': typeof ShipRoute
   '/stock': typeof StockRoute
-  '/api/chat': typeof ApiChatRoute
+  '/api/chat': typeof ApiChatRouteWithChildren
   '/api/whatsapp': typeof ApiWhatsappRoute
   '/books/purchases': typeof BooksPurchasesRoute
   '/books/sales': typeof BooksSalesRoute
   '/books/stock': typeof BooksStockRoute
   '/books/': typeof BooksIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chat/cron': typeof ApiChatCronRoute
+  '/api/chat/end': typeof ApiChatEndRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -191,6 +209,8 @@ export interface FileRouteTypes {
     | '/books/stock'
     | '/books/'
     | '/api/auth/$'
+    | '/api/chat/cron'
+    | '/api/chat/end'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -210,6 +230,8 @@ export interface FileRouteTypes {
     | '/books/stock'
     | '/books'
     | '/api/auth/$'
+    | '/api/chat/cron'
+    | '/api/chat/end'
   id:
     | '__root__'
     | '/'
@@ -229,6 +251,8 @@ export interface FileRouteTypes {
     | '/books/stock'
     | '/books/'
     | '/api/auth/$'
+    | '/api/chat/cron'
+    | '/api/chat/end'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -242,7 +266,7 @@ export interface RootRouteChildren {
   SalesRoute: typeof SalesRoute
   ShipRoute: typeof ShipRoute
   StockRoute: typeof StockRoute
-  ApiChatRoute: typeof ApiChatRoute
+  ApiChatRoute: typeof ApiChatRouteWithChildren
   ApiWhatsappRoute: typeof ApiWhatsappRoute
   BooksPurchasesRoute: typeof BooksPurchasesRoute
   BooksSalesRoute: typeof BooksSalesRoute
@@ -372,8 +396,35 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/chat/cron': {
+      id: '/api/chat/cron'
+      path: '/cron'
+      fullPath: '/api/chat/cron'
+      preLoaderRoute: typeof ApiChatCronRouteImport
+      parentRoute: typeof ApiChatRoute
+    }
+    '/api/chat/end': {
+      id: '/api/chat/end'
+      path: '/end'
+      fullPath: '/api/chat/end'
+      preLoaderRoute: typeof ApiChatEndRouteImport
+      parentRoute: typeof ApiChatRoute
+    }
   }
 }
+
+interface ApiChatRouteChildren {
+  ApiChatCronRoute: typeof ApiChatCronRoute
+  ApiChatEndRoute: typeof ApiChatEndRoute
+}
+
+const ApiChatRouteChildren: ApiChatRouteChildren = {
+  ApiChatCronRoute: ApiChatCronRoute,
+  ApiChatEndRoute: ApiChatEndRoute,
+}
+
+const ApiChatRouteWithChildren =
+  ApiChatRoute._addFileChildren(ApiChatRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -386,7 +437,7 @@ const rootRouteChildren: RootRouteChildren = {
   SalesRoute: SalesRoute,
   ShipRoute: ShipRoute,
   StockRoute: StockRoute,
-  ApiChatRoute: ApiChatRoute,
+  ApiChatRoute: ApiChatRouteWithChildren,
   ApiWhatsappRoute: ApiWhatsappRoute,
   BooksPurchasesRoute: BooksPurchasesRoute,
   BooksSalesRoute: BooksSalesRoute,
