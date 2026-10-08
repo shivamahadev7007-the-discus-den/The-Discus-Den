@@ -176,8 +176,8 @@ export default defineConfig(({ command, isPreview }) => ({
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
             // LB-19: daily chat safety net (Vercel Hobby allows one run a day).
-            // 03:30 UTC = 09:00 IST. Merged into .vercel/output/config.json; the
-            // same entry is in vercel.json. Set CRON_SECRET in Vercel to protect it.
+            // 03:30 UTC = 09:00 IST. Merged into .vercel/output/config.json. Declare it
+            // ONLY here (not in vercel.json too: Vercel rejects duplicated_cron_job). Set CRON_SECRET in Vercel.
             vercel: {
               config: {
                 crons: [{ path: "/api/chat/cron", schedule: "30 3 * * *" }],
