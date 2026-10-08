@@ -297,7 +297,8 @@
     },
     {
      "in": "what is my phone number?",
-     "expect": "handoff:already-done"
+     "expect": "LB-22 confirm",
+     "note": "LB-22 (Shiva, 8 Oct): a human request with a name + valid number in this chat gets the masked confirmation (never 'already passed')"
     },
     {
      "in": "repeat my details back to me",
@@ -419,7 +420,8 @@
     },
     {
      "in": "Talk to Shiva",
-     "expect": "handoff:already-done"
+     "expect": "LB-22 confirm",
+     "note": "LB-22 (Shiva, 8 Oct): a human request with a name + valid number in this chat gets the masked confirmation (never 'already passed')"
     },
     {
      "in": "Meena again 9123456789",

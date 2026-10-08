@@ -9,6 +9,10 @@ import { formatLeadAlert, type LeadForAlert, type TranscriptLine } from "./lead-
 import { createMemoryChatStore } from "./store.ts";
 import { findPlaceFuzzy } from "./places.ts";
 
+/** LB-22: the k-th human request with no name / number known; from the 3rd, the LB-15 line (index `firm`) comes first. */
+const PUSH_ASK = (k: number, firm?: number): string =>
+  firm === undefined ? ANSWERS.humanAskBoth(k) : `${firmPushReply(firm)}\n\n${ANSWERS.humanAskBoth(k)}`;
+
 // ---------------------------------------------------------------------------
 // Fixtures: same markup shape as the live server-rendered pages.
 // ---------------------------------------------------------------------------
@@ -72,12 +76,18 @@ function withoutAsk(text: string): string {
   return text;
 }
 
+/** LB-22 sweep (Kiara G1): no reply anywhere in this suite claims the details were passed without a valid number. */
+const PASSED_CLAIM = /\b(I've|I have)\s+(already\s+)?(passed|shared|sent)\b|\bpassed your (details|number)\b|\bShiva has your (details|number)\b|\bShiva will contact you\b/i;
+function assertNoFalseClaim(reply: string, s: ChatState, ctx: string): void {
+  if (PASSED_CLAIM.test(reply)) assert.ok(s.lead.phone || (s.prior?.phone && !s.priorRejected), `'passed' claim without a valid number: ${ctx} -> ${reply}`);
+}
 async function chat(messages: string[], catalog: CatalogLoader = liveCatalog(), start: ChatState | null = null) {
   let state = start;
   const out: Array<Awaited<ReturnType<typeof respond>> & { guarded: string; asked: boolean }> = [];
   for (const m of messages) {
     const r = await respond(state, m, { catalog });
     state = r.state;
+    assertNoFalseClaim(r.reply, r.state, m);
     const reply = withoutAsk(r.reply);
     out.push({ ...r, reply, guarded: guardReply(reply).text, asked: reply !== r.reply });
   }
@@ -712,8 +722,8 @@ describe("HTTP /api/chat", () => {
     assert.equal(alerts[0]!.lead.state.lead.lookingFor, "Discus fish");
     assert.equal(store.leads.get(SID)!.completed, true);
     assert.equal(store.chats.size, 1, "post-close messages did not start a new chat");
-    // A push after the close is told the details were already passed.
-    assert.equal(replies[8], ANSWERS.handoffAlreadyDone);
+    // LB-22: a push after the close gets the masked confirmation (never the number in full).
+    assert.equal(replies[8], ANSWERS.humanConfirm("Ravi", "98xxxxxx45", 0));
     for (const r of replies) assert.doesNotMatch(r, /9845012345|98450/);
   });
 
@@ -1492,12 +1502,13 @@ describe("LB-6: steer to the site instead of a handoff", () => {
       assert.equal(guardReply(r.reply).text, r.reply);
     });
   }
-  // LB-19 (8 Oct): pushes get the name + WhatsApp ask twice, then the LB-15 line; a typed number is saved.
-  it("repeated pushes: two name + WhatsApp asks, then the LB-15 polite reply (rotated), never a handoff; the typed number is saved", async () => {
+  // LB-22 (Shiva, 8 Oct; was LB-19's two asks then LB-15): EVERY push gets the name + WhatsApp ask
+  // (rotated); from the 3rd push the LB-15 line is added in front of it; a typed number is saved.
+  it("repeated pushes: every push asks (rotated), the LB-15 line added from the 3rd, never a handoff; the typed number is saved", async () => {
     const out = await chat(["talk to a human", "please I need to talk to Shiva", "call me", "urgent connect me", "give me your number", "98450 12345"]);
     assert.equal(out[0]!.reply, ANSWERS.contactAskTalk);
     assert.equal(out[1]!.reply, ANSWERS.contactAskTalk2);
-    assert.deepEqual(out.slice(2, 5).map((r) => r.reply), HUMAN_PUSH_FIRM.slice(0, 3));
+    assert.deepEqual(out.slice(2, 5).map((r) => r.reply), [2, 3, 4].map((k, i) => PUSH_ASK(k, i)));
     assert.equal(out[5]!.reply, ANSWERS.contactNeedName);
     for (const r of out.slice(1)) {
       assert.equal(r.state.handoff.active, false);
@@ -1637,7 +1648,8 @@ describe("Kiara LB-6 run (7a73e2c): regressions", () => {
     ["A10", ["enna number sir, pesanum"], is(ANSWERS.contactAskTalk)],
     ["A11", ["bhai owner se baat karao"], is(ANSWERS.contactAskTalk)],
     // LB-19: the price answer carried ask 1, so this push gets ask 2 (different reason).
-    ["A12", ["hi", "price of blue diamond", "ok now give me your number"], is(ANSWERS.contactAskTalk2)],
+    // LB-22: the first human request in the chat gets the first talk ask (its own rotation).
+    ["A12", ["hi", "price of blue diamond", "ok now give me your number"], is(ANSWERS.contactAskTalk)],
     ["B1", ["how do i buy"], is(ORDER_SOP)],
     ["B2", ["how to place order"], is(ORDER_SOP)],
     ["B3", ["can I order on chat itself?"], is(ANSWERS.orderInChat)],
@@ -2159,7 +2171,8 @@ const NO_BANG = (s: string) => (s.match(/!/g) ?? []).length === 0;
 describe("LB-15: escalating, never-identical replies to repeated pushes", () => {
   it("Shiva's repro + 2 more: full steer, short steer, LB-15 reply, then rotated variants", async () => {
     const out = await chat(["Connect to Shiva", "can I talk to the owner", "please connect me with him", "put me through to the owner", "get me the manager"]);
-    assert.deepEqual(out.map((r) => r.reply), [ANSWERS.contactAskTalk, ANSWERS.contactAskTalk2, HUMAN_PUSH_FIRM[0], HUMAN_PUSH_FIRM[1], HUMAN_PUSH_FIRM[2]]);
+    // LB-22: every push still asks; the LB-15 line is added from the 3rd (never instead of the ask).
+    assert.deepEqual(out.map((r) => r.reply), [ANSWERS.contactAskTalk, ANSWERS.contactAskTalk2, PUSH_ASK(2, 0), PUSH_ASK(3, 1), PUSH_ASK(4, 2)]);
     for (const r of out) {
       assert.equal(r.intent, "human_push");
       assert.equal(r.state.handoff.active, false);
@@ -2185,7 +2198,7 @@ describe("LB-15: escalating, never-identical replies to repeated pushes", () => 
     const out = await chat(["talk to shiva", "price of blue diamond", "contact the owner", "do you ship to Kochi?", "conect to shiva"]);
     assert.equal(out[0]!.reply, ANSWERS.contactAskTalk);
     assert.equal(out[2]!.reply, ANSWERS.contactAskTalk2);
-    assert.equal(out[4]!.reply, ANSWERS.humanPushFirm);
+    assert.equal(out[4]!.reply, PUSH_ASK(2, 0), "LB-22: LB-15 line + the ask");
   });
   // LB-19 (8 Oct): a typed number is no longer a push: it is saved and the bot asks for the name.
   it("'are you a bot?' counts as a push; a typed number is saved (LB-19)", async () => {
@@ -2194,8 +2207,9 @@ describe("LB-15: escalating, never-identical replies to repeated pushes", () => 
     assert.equal(out[1]!.reply, ANSWERS.contactAskTalk2);
     assert.equal(out[2]!.reply, ANSWERS.contactNeedName);
     assert.equal(out[2]!.state.lead.phone, "+919845012345");
-    assert.equal(out[3]!.reply, ANSWERS.handoffAlreadyDone);
-    assert.equal(out[4]!.reply, ANSWERS.humanPushFirm);
+    // LB-22: number without a name -> the pushes ask for the name (never "already passed" claims).
+    assert.equal(out[3]!.reply, `${ANSWERS.humanPushFirm}\n\n${ANSWERS.humanAskName(0)}`);
+    assert.equal(out[4]!.reply, `${firmPushReply(1)}\n\n${ANSWERS.humanAskName(1)}`);
   });
   it("a 20-push session: no two consecutive bot replies are identical; each canned steer is used once", async () => {
     const msgs = [
@@ -2205,8 +2219,12 @@ describe("LB-15: escalating, never-identical replies to repeated pushes", () => 
     ];
     const out = await chat(msgs);
     for (let i = 1; i < out.length; i++) assert.notEqual(out[i]!.reply, out[i - 1]!.reply, `turns ${i - 1}/${i}: ${msgs[i]}`);
-    assert.equal(out.filter((r) => r.reply.includes(ANSWERS.contactAskTalk)).length, 1);
-    assert.equal(out.filter((r) => r.reply.includes(ANSWERS.contactAskTalk2)).length, 1);
+    // LB-22: every reply in the session is unique, and every push still asks (number, or the name once the number is in).
+    assert.equal(new Set(out.map((r) => r.reply)).size, out.length);
+    out.forEach((r, i) => {
+      if (msgs[i] === "9845012345") return;
+      assert.ok(/name and WhatsApp number/.test(r.reply) || [0, 1, 2, 3].some((k) => r.reply.endsWith(ANSWERS.humanAskName(k))), `${i}: ${r.reply}`);
+    });
     for (const r of out) {
       assert.equal(r.state.handoff.active, false);
       assert.doesNotMatch(r.reply, /didn't catch that/);
@@ -2443,9 +2461,10 @@ describe("Kiara 8a88e4e: LB-14 typo and 'human' misses", () => {
   it("Kiara's mixed LB-15 session: 'I need a human now' is the 4th push, not a fallback", async () => {
     const out = await chat(["Connect to Shiva", "can I talk to the owner", "please connect me with him", "I need a human now", "just let me speak to Shiva"]);
     for (const r of out) assert.equal(r.intent, "human_push");
-    assert.equal(out[2]!.reply, ANSWERS.humanPushFirm);
-    assert.equal(out[3]!.reply, firmPushReply(1));
-    assert.equal(out[4]!.reply, firmPushReply(2));
+    // LB-22: LB-15 line + the ask from the 3rd push.
+    assert.equal(out[2]!.reply, PUSH_ASK(2, 0));
+    assert.equal(out[3]!.reply, PUSH_ASK(3, 1));
+    assert.equal(out[4]!.reply, PUSH_ASK(4, 2));
   });
 });
 
@@ -2479,7 +2498,8 @@ describe("Kiara 8a88e4e: LB-15 never repeats any earlier reply", () => {
       assert.equal(guardReply(r.reply).text, r.reply);
       assertClean(r.reply);
     }
-    assert.equal(out[2]!.reply, ANSWERS.humanPushFirm, "3rd push is Shiva's wording");
+    // LB-22: the 3rd push opens with Shiva's LB-15 wording, then still asks.
+    assert.equal(out[2]!.reply, PUSH_ASK(2, 0), "3rd push is Shiva's wording + the ask");
   });
   it("no push reply equals any earlier bot reply, even with other questions in between", async () => {
     const msgs: string[] = [];

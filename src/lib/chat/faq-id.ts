@@ -48,6 +48,9 @@ const FIXED: Array<[string, string]> = [
   [ANSWERS.contactAskTalk, "LB-19 ask"],
   [ANSWERS.contactAskTalk2, "LB-19 ask"],
   [ANSWERS.contactAskYes, "LB-19 ask"],
+  // LB-22: the other human-request rotation variants (0 and 1 are contactAskTalk / contactAskTalk2).
+  [ANSWERS.humanAskBoth(2), "LB-19 ask"],
+  [ANSWERS.humanAskBoth(3), "LB-19 ask"],
   [ANSWERS.contactNeedName, "LB-19 contact saved"],
   [ANSWERS.phoneInvalid, "LB-19 recheck number"],
   [ANSWERS.humanPush, "LB-6 steer"],
@@ -117,5 +120,11 @@ export function faqIdOf(reply: string): string {
   if (/^Thanks(, [^.]+)?\. What's the best WhatsApp/.test(first)) return "handoff:phone";
   if (/^Thanks, [^.]+\. How can I help\?/.test(first)) return "name-given";
   if (/^Thank you(, [^.]+)?\. I've passed this to Shiva/.test(first)) return "handoff:close";
+  // LB-22: human-request asks and the confirmation of the name + number on file.
+  if (/^(I have you as |Just to check: is |Shiva can reach you as |Happy to pass this to Shiva\. Can you confirm )/.test(first)) return "LB-22 confirm";
+  for (let k = 0; k < 4; k++) if (first === ANSWERS.humanAskName(k)) return "LB-22 ask name";
+  if (/^(Thanks|Sure|Of course), [^.]+\. (What's your WhatsApp number|Please share your WhatsApp number|Type your WhatsApp number)|^Happy to pass this to Shiva, [^.]+\. What's the best WhatsApp number/.test(first)) return "LB-22 ask number";
+  if (/^(Thanks|Perfect|Great, thanks),? [^.]*\. Shiva (will get back to you personally on that number|has your details|will reach you on that number)/.test(first)) return "LB-22 confirmed";
+  for (let k = 0; k < 3; k++) if (first === ANSWERS.humanConfirmNo(k)) return "LB-22 fix number";
   return "other";
 }

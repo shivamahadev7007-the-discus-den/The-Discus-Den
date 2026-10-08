@@ -593,7 +593,7 @@ describe("LB-19 · email content and Resend call", () => {
       /Tag: {9}Lead/,
       /Name: {8}Ravi/,
       /Phone: {7}\+919845012345/,
-      /City: {8}Kerala/, // the engine stores Kochi as its state
+      /City: {8}Kochi/, // LB-22: the volunteered city ("I live in Kochi") is kept (was its state, Kerala)
       /Source: {6}\?from=insta/,
       /Chat started: 08 Oct 2026, 11:30 IST/,
       /Chat ended: {3}08 Oct 2026, 11:41 IST \(closing message after details were collected, then 10 min with no messages\)/,
@@ -604,3 +604,102 @@ describe("LB-19 · email content and Resend call", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// LB-22 (Shiva, 8 Oct 2:13 PM) — Kiara's lb22-test-cases.md, email side (G4), on both stores.
+// ---------------------------------------------------------------------------
+const LB22_SHIVA = [
+  "Hey - how is it going. I am Arjun from Bangalore looking to buy discus.",
+  "Sounds good - how to order and pay online!",
+  "I see - thanks. Can you connect to the owner or a human agent?",
+];
+const LB22_CLAIM = /\b(I've|I have)\s+(already\s+)?(passed|shared|sent)\b|\bpassed your (details|number)\b/i;
+for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (PGlite + migrations)", pgHarness]] as const) {
+  describe(`LB-22 · human requests and the one email per chat · ${label}`, () => {
+    it("case 1: Shiva's chat + a valid number -> closing by name; End -> exactly 1 [Lead] email (Arjun, number, Bangalore, full transcript)", async () => {
+      const h = await make();
+      const { deps, sent } = makeDeps(h, { t: T0 });
+      const replies: string[] = [];
+      await quiet(async () => {
+        for (const m of LB22_SHIVA) replies.push(await say(deps, sid(221), m));
+        replies.push(await say(deps, sid(221), "My WhatsApp number is 9845012312"));
+        await end(deps, sid(221));
+      });
+      assert.ok(replies[0]!.endsWith(ANSWERS.humanAskPhone("Arjun", 0)));
+      assert.equal(replies[2], ANSWERS.humanAskPhone("Arjun", 1));
+      assert.doesNotMatch(replies[2]!, LB22_CLAIM);
+      assert.equal(replies[3], ANSWERS.handoffClose("Arjun"));
+      assert.equal(sent.length, 1);
+      const email = buildLeadAlertEmail(sent[0]!.lead, sent[0]!.transcript, { to: "x@example.com" });
+      assert.match(email.subject, /^\[Lead\] New chat lead: Arjun/);
+      assert.match(email.text, /Phone: {7}\+919845012312/);
+      assert.match(email.text, /City: {8}Bangalore/);
+      assert.equal(sent[0]!.transcript.length, 8);
+      assert.equal((await h.chats())[0]!.phone, "+919845012312");
+      await h.close();
+    });
+    it("case 1b: same chat, then 'No thanks' -> no claim; End -> 1 [Visitor] email (name Arjun, no number)", async () => {
+      const h = await make();
+      const { deps, sent } = makeDeps(h, { t: T0 });
+      const replies: string[] = [];
+      await quiet(async () => {
+        for (const m of [...LB22_SHIVA, "No thanks"]) replies.push(await say(deps, sid(222), m));
+        await end(deps, sid(222));
+      });
+      for (const r of replies) assert.doesNotMatch(r, LB22_CLAIM);
+      assert.equal(replies[3], ANSWERS.handoffDeclined);
+      assert.equal(sent.length, 1);
+      assert.match(subjectOf(sent[0]!), /^\[Visitor[^\]]*\] Website chat: Arjun/);
+      await h.close();
+    });
+    it("case 3b: an invalid number after the ask -> recheck, never saved; End -> [Visitor]", async () => {
+      const h = await make();
+      const { deps, sent } = makeDeps(h, { t: T0 });
+      const replies: string[] = [];
+      await quiet(async () => {
+        replies.push(await say(deps, sid(223), "Connect me to the owner"));
+        replies.push(await say(deps, sid(223), "+91 98765 000"));
+        await end(deps, sid(223));
+      });
+      assert.equal(replies[1], ANSWERS.phoneInvalid);
+      for (const r of replies) assert.doesNotMatch(r, LB22_CLAIM);
+      assert.match(subjectOf(sent[0]!), /^\[Visitor/);
+      assert.equal((await h.chats())[0]!.phone, null);
+      await h.close();
+    });
+    it("case 4: number first, then 'Can I talk to Shiva?' -> masked confirmation (no re-ask); End -> 1 [Lead] email", async () => {
+      const h = await make();
+      const { deps, sent } = makeDeps(h, { t: T0 });
+      const replies: string[] = [];
+      await quiet(async () => {
+        replies.push(await say(deps, sid(224), "I am Priya, my number is 9123456780"));
+        replies.push(await say(deps, sid(224), "Can I talk to Shiva?"));
+        await end(deps, sid(224));
+      });
+      assert.equal(replies[1], ANSWERS.humanConfirm("Priya", "91xxxxxx80", 0));
+      assert.equal(sent.length, 1);
+      assert.match(subjectOf(sent[0]!), /^\[Lead\] New chat lead: Priya/);
+      await h.close();
+    });
+    it("case 6: known returning customer -> 'Can I talk to the owner?' confirms the number on file; 'yes' -> true claim; End -> [Lead · returning]", async () => {
+      const h = await make();
+      const clock = { t: T0 };
+      const { deps, sent } = makeDeps(h, clock);
+      const replies: string[] = [];
+      await quiet(async () => {
+        await say(deps, sid(225), "What is the price of Blue Diamond?");
+        await say(deps, sid(225), "I'm Ravi, 9845012345");
+        await end(deps, sid(225));
+        clock.t += 24 * 60 * MIN; // day 2, same browser session
+        replies.push(await say(deps, sid(225), "Can I talk to the owner?"));
+        replies.push(await say(deps, sid(225), "yes"));
+        await end(deps, sid(225));
+      });
+      assert.equal(replies[0], ANSWERS.humanConfirm("Ravi", "98xxxxxx45", 0));
+      assert.equal(replies[1], ANSWERS.humanConfirmYes("Ravi", 0));
+      assert.equal(sent.length, 2);
+      assert.match(subjectOf(sent[1]!), /^\[Lead · returning\] Website chat: Ravi/);
+      await h.close();
+    });
+  });
+}

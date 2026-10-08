@@ -54,6 +54,12 @@ export function outOfAreaReply(place?: string, abroad = false): string {
 
 export const PER_PIECE_LINE = "All prices are per piece. A pair is two pieces.";
 
+/** LB-22: the k-th phrasing of a rotation (wraps; a non-number index reads as 0). */
+function pickRot(list: readonly string[], k: unknown): string {
+  const i = typeof k === "number" && Number.isInteger(k) && k >= 0 ? k : 0;
+  return list[i % list.length]!;
+}
+
 export const ANSWERS = {
   // Section 2
   welcome:
@@ -119,14 +125,66 @@ export const ANSWERS = {
    * LB-21 (Shiva, 8 Oct): asks only promise that Shiva gets back personally. Never
    * promise a reservation or a stock alert (the constant name is kept, no refactor).
    */
-  contactAskPhotos: "May I have your name and WhatsApp number? Shiva can send you photos and videos of the actual fish.",
+  // LB-21 part 2 (Shiva, 8 Oct): the first ask only promises passing the details to Shiva (no photos / videos).
+  contactAskPhotos: "May I have your name and WhatsApp number? I'll pass them to Shiva so he can get back to you personally.",
   contactAskReserve:
     "If you'd like, share your name and WhatsApp number, and Shiva can get back to you personally.",
   /** LB-19: "talk / connect to Shiva" gets the ask instead of the LB-14 self-explanatory line. */
   contactAskTalk:
-    "Sure, I can pass your request to Shiva. May I have your name and WhatsApp number? Shiva can send you photos and videos of the actual fish.",
+    "Sure, I can pass your request to Shiva. May I have your name and WhatsApp number? He'll get back to you personally.",
   contactAskTalk2:
     "Happy to pass this to Shiva. Please share your name and WhatsApp number here, and he can get back to you personally.",
+  /**
+   * LB-22 (Shiva, 8 Oct): EVERY human / owner / Shiva request asks for name + WhatsApp (not
+   * capped). Rotations: the next unused phrasing per chat, so no reply repeats word for word.
+   * Nothing here says details were passed: that is only said once a valid number exists.
+   */
+  /** Neither name nor number known. */
+  humanAskBoth: (k: unknown = 0): string =>
+    pickRot([
+      "Sure, I can pass your request to Shiva. May I have your name and WhatsApp number? He'll get back to you personally.",
+      "Happy to pass this to Shiva. Please share your name and WhatsApp number here, and he can get back to you personally.",
+      "Of course. Please type your name and WhatsApp number here, and I'll pass them to Shiva so he can reach you personally.",
+      "I'll get your request to Shiva. What's your name and WhatsApp number? He'll get back to you personally.",
+    ], k),
+  /** Name known, no number. */
+  humanAskPhone: (name: string, k = 0): string =>
+    pickRot([
+      `Thanks, ${name}. What's your WhatsApp number? I'll pass it to Shiva so he can get back to you personally.`,
+      `Sure, ${name}. Please share your WhatsApp number here, and Shiva can get back to you personally.`,
+      `Happy to pass this to Shiva, ${name}. What's the best WhatsApp number for him to reach you on?`,
+      `Of course, ${name}. Type your WhatsApp number here and I'll pass it to Shiva so he can reach you personally.`,
+    ], k),
+  /** Valid number known (this chat or on file), no name. */
+  humanAskName: (k: unknown = 0): string =>
+    pickRot([
+      "Sure, I can pass this to Shiva. What name should he use when he gets back to you?",
+      "Happy to. May I have your name, so Shiva knows who he's getting back to?",
+      "Of course. What's your name? Shiva will use it when he reaches you on WhatsApp.",
+      "I'll pass this to Shiva. Just tell me your name so he knows who to get back to.",
+    ], k),
+  /** Valid name + number known (this chat, or on file from an earlier chat): confirm, number masked. */
+  humanConfirm: (name: string, masked = "98xxxxxx10", k = 0): string =>
+    pickRot([
+      `I have you as ${name}, ${masked}. Is that right? Shiva will get back to you on it.`,
+      `Just to check: is ${name}, ${masked} still the best name and WhatsApp number? If so, Shiva will get back to you personally.`,
+      `Shiva can reach you as ${name} on ${masked}. Is that correct?`,
+      `Happy to pass this to Shiva. Can you confirm ${name}, ${masked} is right?`,
+    ], k),
+  /** "yes" to the confirmation (a valid number exists, so this may say Shiva has it). */
+  humanConfirmYes: (name: string, k = 0): string =>
+    pickRot([
+      `Thanks, ${name}. Shiva will get back to you personally on that number. Anything else I can help with?`,
+      `Perfect, ${name}. Shiva has your details and will get back to you personally. Anything else I can help with?`,
+      `Great, thanks ${name}. Shiva will reach you on that number. Anything else I can help with?`,
+    ], k),
+  /** "no" to the confirmation: ask for the correct number. */
+  humanConfirmNo: (k: unknown = 0): string =>
+    pickRot([
+      "No problem. What's the right WhatsApp number? I'll pass it to Shiva so he can get back to you personally.",
+      "Sorry about that. Please type the correct WhatsApp number here, and Shiva can get back to you personally.",
+      "Thanks for checking. What's the best WhatsApp number to use? I'll pass it to Shiva.",
+    ], k),
   /** LB-19: "yes" after an ask. */
   contactAskYes: "Great. Please type your name and WhatsApp number here.",
   /** LB-19: a number typed alongside another question (the answer comes first). */
