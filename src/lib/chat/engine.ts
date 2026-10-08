@@ -1166,7 +1166,7 @@ function contactOrPush(state: ChatState): Turn {
   return { reply: firm(), intent: "human_push" };
 }
 
-/** After a real-interest answer: append the ask (1st: photos; 2nd, a later interest turn: reserve / stock alert). */
+/** After a real-interest answer: append the ask (1st: photos; 2nd, a later interest turn: Shiva gets back personally; LB-21). */
 function maybeAppendAsk(state: ChatState, turn: Turn): Turn {
   if (!INTEREST_INTENT.test(turn.intent)) return turn;
   if (knownPhone(state) || state.completed || state.handoff.active || state.pendingOffer === "lookingFor") return turn;

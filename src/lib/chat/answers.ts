@@ -116,15 +116,17 @@ export const ANSWERS = {
    * LB-19 (Shiva, 8 Oct): name + WhatsApp asks. [Photos] goes after the first
    * real-interest question; [Reserve] is the one later re-ask with a different
    * reason. Max 2 asks per chat, then the bot stops asking.
+   * LB-21 (Shiva, 8 Oct): asks only promise that Shiva gets back personally. Never
+   * promise a reservation or a stock alert (the constant name is kept, no refactor).
    */
   contactAskPhotos: "May I have your name and WhatsApp number? Shiva can send you photos and videos of the actual fish.",
   contactAskReserve:
-    "If you'd like, share your name and WhatsApp number. Shiva can help you reserve the fish you like, or message you when new stock arrives.",
+    "If you'd like, share your name and WhatsApp number, and Shiva can get back to you personally.",
   /** LB-19: "talk / connect to Shiva" gets the ask instead of the LB-14 self-explanatory line. */
   contactAskTalk:
     "Sure, I can pass your request to Shiva. May I have your name and WhatsApp number? Shiva can send you photos and videos of the actual fish.",
   contactAskTalk2:
-    "Happy to pass this to Shiva. Please share your name and WhatsApp number here, and he can also help you reserve the fish you like.",
+    "Happy to pass this to Shiva. Please share your name and WhatsApp number here, and he can get back to you personally.",
   /** LB-19: "yes" after an ask. */
   contactAskYes: "Great. Please type your name and WhatsApp number here.",
   /** LB-19: a number typed alongside another question (the answer comes first). */

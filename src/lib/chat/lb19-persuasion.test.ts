@@ -1,7 +1,7 @@
 /**
  * LB-19 (Shiva, 8 Oct 2026): name + WhatsApp capture in the engine.
  *  - after the first real-interest answer (price, strain, delivery, visit): ask 1 (photos / videos)
- *  - once more on a LATER interest turn (not the very next turn): ask 2 (reserve / stock alert); max 2
+ *  - once more on a LATER interest turn (not the very next turn): ask 2 (Shiva gets back personally; LB-21); max 2
  *  - a number typed anywhere is saved (with a name next to it); invalid numbers get a polite recheck
  *  - "talk / connect to Shiva" gets the ask; LB-15's polite line only after a decline / both asks
  */
@@ -111,7 +111,7 @@ describe("LB-19 · ask after the first real-interest question", () => {
 });
 
 describe("LB-19 · ask once more later, different reason, max 2", () => {
-  it("ignored: no re-ask on the very next turn; ask 2 (reserve / stock alert) on a later interest turn; then never again", async () => {
+  it("ignored: no re-ask on the very next turn; ask 2 (get back personally) on a later interest turn; then never again", async () => {
     const out = await run(["price of blue diamond?", "do you ship to Kochi?", "red ninja price", "how long does delivery take?", "do you have blue diamond?", "price of red ninja?"]);
     const r = out.map((o) => o.reply);
     assert.ok(r[0]!.endsWith(ASK1));
@@ -120,7 +120,15 @@ describe("LB-19 · ask once more later, different reason, max 2", () => {
     assert.equal(asks(r.slice(3)), 0, "max 2 asks per chat");
     assert.equal(out.at(-1)!.state.contactAsk?.count, 2);
     assert.notEqual(ASK1, ASK2);
-    assert.match(ASK2, /reserve|new stock/);
+    // LB-21 (Shiva, 8 Oct): ask 2 only promises Shiva gets back; never a reservation / stock alert.
+    assert.ok(ASK2.includes("get back to you personally"), ASK2);
+    assert.doesNotMatch(ASK2, /reserve|stock alert|new stock|book/i);
+  });
+  it("LB-21: neither later ask (ask 2 / talk ask 2) promises a reservation or stock", () => {
+    for (const a of [ANSWERS.contactAskReserve, ANSWERS.contactAskTalk2]) {
+      assert.doesNotMatch(a, /reserve|stock/i, a);
+      assert.ok(a.includes("get back to you personally"), a);
+    }
   });
   it("declined: 'no thanks' -> 'No problem.'; one later re-ask; then stop", async () => {
     const out = await run(["price of blue diamond?", "no thanks", "do you ship to Kochi?", "red ninja price", "no", "how long does delivery take?"]);
