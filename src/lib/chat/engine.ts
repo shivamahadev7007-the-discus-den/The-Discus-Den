@@ -111,7 +111,7 @@ export type ChatState = {
   /** LB-19: LB-15 polite replies given this chat (rotation index). */
   pushFirms?: number;
   /** LB-22/25: next rotation index per reply kind (no reply repeats word for word in a chat). */
-  askRot?: { both?: number; phone?: number; name?: number; later?: number; passed?: number; privacy?: number; decline?: number };
+  askRot?: { both?: number; phone?: number; name?: number; later?: number; passed?: number; privacy?: number; decline?: number; greet?: number };
 };
 
 export function newChatState(): ChatState {
@@ -1399,6 +1399,108 @@ function pleasantryReply(state: ChatState, kind: Pleasantry): Turn {
   return { reply: `${lead} ${ANSWERS.handoffAskLookingFor}`, intent };
 }
 
+// ---------------------------------------------------------------------------
+// LB-28 (Shiva, 8 Oct 6:10 PM): a greeting + intro and/or "I love discus" + intent in ONE
+// message ("Hi - I am Shruti. I love Discus keeping and am planning to buy Discus.").
+// Root cause of the 'didn't catch that': greetings, intros and "I love discus" were only
+// recognised as the WHOLE message (pleasantry / welcome / name_given rules), and buy intent
+// only as "want to buy / looking for ... discus", so the leftover clauses made every rule miss.
+// Now the social part is answered warmly (by name) and the rest is routed on its own.
+// ---------------------------------------------------------------------------
+/** LB-28 / LB-22: buy intent beyond "want to buy discus" (planning / looking / thinking of ...). */
+const BUY_PLAN =
+  /\b(?:plan(?:ning|ned)?|want(?:ing)?|wanna|looking|thinking|keen|interested|hoping|intend(?:ing)?|would\s+(?:like|love)|i'?d\s+(?:like|love)|eager|ready|going)\s+(?:to|of|on|in)\s+(?:buy(?:ing)?|purchas(?:e|ing)|get(?:ting)?\s+(?:some|a|few|my|new|discus|fish|pairs?|them|one|two|three|\d)|bring(?:ing)?\s+home)\b|\bgetting\s+(?:some|a\s+few|a\s+pair\s+of|a\s+couple\s+of|my\s+first|new)\s+(?:discus|fish)\b|\b(?:buy|buying)\s+(?:some|a\s+few|a\s+pair\s+of|a\s+couple\s+of)\s+discus\b/;
+const NOT_BUY = /\b(?:not|don'?t|do\s+not|never|no\s+longer|won'?t)\s+(?:\w+\s+){0,2}?(?:plan|want|look|think|keen|interest|hop|intend|like|buy|get)/;
+function isBuyIntent(t: string): boolean {
+  return BUY_PLAN.test(t) && !NOT_BUY.test(t);
+}
+/** LB-28: "I love discus (keeping)", "I keep discus", "discus lover here", "I'm a discus keeper". */
+const KEEPER_RE =
+  /\b(?:i\s+(?:really\s+|absolutely\s+|just\s+|truly\s+)?(?:love|adore|like|enjoy)\s+(?:keeping\s+)?(?:discus(?:es)?|discus\s+fish)(?:\s+(?:keeping|fish|hobby|so\s+much|a\s+lot|very\s+much))*|i\s+(?:keep|have\s+kept|have\s+been\s+keeping|am\s+keeping|'m\s+keeping)\s+discus(?:\s+fish)?(?:\s+(?:for\s+(?:a\s+few\s+|many\s+|some\s+)?(?:years?|months?|a\s+while|long)))?|(?:i'?m|i\s+am|im)\s+(?:a\s+|an\s+)?(?:big\s+)?(?:discus\s+)(?:keeper|lover|hobbyist|enthusiast|fan)|discus\s+(?:lover|keeper|enthusiast|hobbyist|fan)(?:\s+here)?|passionate\s+about\s+discus|(?:a\s+)?big\s+fan\s+of\s+discus)\b/gi;
+const GREET_WORD = /\b(hi+|hello+|helo|hey+|hai|hiya|heya|howdy|vanakkam|namaste|namaskaram|namaskar|good\s+(?:morning|afternoon|evening|day)|greetings)\b/gi;
+function greetEcho(t: string): string {
+  const m = /\b(hi+|hello+|helo|hey+|hai|hiya|heya|howdy|vanakkam|namaste|namaskaram|namaskar|good\s+(morning|afternoon|evening|day)|greetings)\b/.exec(t);
+  if (!m) return "Hi";
+  if (m[2]) return `Good ${m[2]}`;
+  if (/^hel/.test(m[1]!)) return "Hello";
+  if (/^he/.test(m[1]!) || m[1] === "howdy") return "Hey";
+  if (m[1] === "vanakkam") return "Vanakkam";
+  if (/^namas/.test(m[1]!)) return "Namaste";
+  return "Hi";
+}
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+/** LB-28: "Hi! Shruti here." (a name right after a greeting, followed by "here"). */
+function hereName(raw: string): string | null {
+  const m = /^\W*(?:hi+|hello+|helo|hey+|hai|hiya|heya|howdy|vanakkam|namaste|namaskaram|namaskar|greetings|good\s+(?:morning|afternoon|evening|day))(?:\s+(?:there|all|everyone|team|sir|madam))?\W+([A-Za-z][A-Za-z'-]+)\s+here\b/i.exec(raw);
+  if (!m) return null;
+  const w = m[1]!.toLowerCase();
+  if (NOT_INTRO_NAME.has(w) || NOT_NAME_WORDS.has(w) || FILLER_REPLY.test(w) || /ing$/.test(w) || NAME_BLOCK.test(w) || findPlace(w) || strainWordsIn(w).length) return null;
+  return titleCase(w);
+}
+type Social = { greet: string | null; name: string | null; keeper: boolean; howAreYou: boolean; restRaw: string };
+const HOW_ARE_YOU = /\b(?:how\s+(?:is|'s)\s+it\s+going|how'?s\s+it\s+going|how\s+are\s+(?:you|u)(?:\s+doing)?(?:\s+today)?|how\s+have\s+you\s+been|hope\s+(?:you(?:'re|\s+are)\s+)?(?:doing\s+)?(?:well|good|fine))\b/gi;
+/**
+ * LB-28: the social part of a message: a greeting WITH an intro, or "I love / keep discus".
+ * Null when there is none (or the whole message is a plain pleasantry: LB-13 handles that).
+ * Only this message's typed name is used (LB-24).
+ */
+function socialPreamble(raw: string, t: string): Social | null {
+  const greeted = /\b(hi+|hello+|helo|hey+|hai|hiya|heya|howdy|vanakkam|namaste|namaskaram|namaskar|good\s+(morning|afternoon|evening|day)|greetings)\b/.test(t);
+  const name = introName(raw) ?? (greeted ? hereName(raw) : null);
+  KEEPER_RE.lastIndex = 0;
+  const keeper = KEEPER_RE.test(raw);
+  if (!keeper && !(greeted && name)) return null;
+  if (pleasantryOnly(t) !== null) return null;
+  HOW_ARE_YOU.lastIndex = 0;
+  const howAreYou = HOW_ARE_YOU.test(raw);
+  let rest = raw.replace(GREET_WORD, " ").replace(KEEPER_RE, " ").replace(HOW_ARE_YOU, " ");
+  if (name) {
+    const n = escapeRe(name).replace(/\s+/g, "\\s+");
+    rest = rest
+      // "I am Arjun from Bangalore" -> "I am from Bangalore" (keeps the self-location for delivery).
+      .replace(new RegExp(`\\b(?:my\\s+name\\s+is|i\\s+am|i'm|i’m|im|this\\s+is)\\s+${n}(?=\\s*,?\\s+(?:from|in|at|based)\\b)`, "gi"), "I am")
+      .replace(new RegExp(`\\b(?:my\\s+name\\s+is|my\\s+name's|name\\s+is|myself|call\\s+me|i\\s+am|i'm|i’m|im|this\\s+is)\\s+${n}\\b`, "gi"), " ")
+      .replace(new RegExp(`\\b${n}\\s+here\\b`, "gi"), " ");
+  }
+  // Leftover joiners ("and am planning to buy" -> "planning to buy").
+  rest = rest
+    .replace(/(^|[.,!?;:\-–—]\s*)(?:and|so|also|&)\s+(?:i\s+am\s+|i'm\s+|am\s+)?/gi, "$1")
+    .replace(/(^|[.,!?;:\-–—]\s*)(?:i\s+am|i'm|am)\s+(?=(?:plan|look|think|keen|interest|hop|go|want|wanting|ready|eager))/gi, "$1")
+    .replace(/^[\s\W]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { greet: greeted ? greetEcho(t) : null, name, keeper, howAreYou, restRaw: rest };
+}
+/** LB-28: the warm reply when the social part is all there is (or the rest matched nothing). */
+function greetIntroReply(state: ChatState, s: Social): Turn {
+  state.pendingOffer = null;
+  const warm = ANSWERS.greetIntro(s.greet ?? "Hi", s.name, s.keeper, nextRot(state, "greet"), s.howAreYou);
+  const intent = s.name ? "name_given" : "welcome";
+  const known = state.askedLookingFor || state.lookingForHint || state.lead.lookingFor || state.handoff.active || state.completed || Boolean(state.lead.phone) || (state.contactAsk?.count ?? 0) > 0;
+  if (known) return { reply: `${warm} ${ANSWERS.greetIntroHelp}`, intent };
+  state.askedLookingFor = true;
+  state.pendingOffer = "lookingFor";
+  return { reply: `${warm} ${ANSWERS.greetIntroWelcome} ${ANSWERS.handoffAskLookingFor}`, intent };
+}
+/** Intents that mean "nothing real was answered": the warm greeting replaces them. */
+const SOCIAL_FALLBACK = new Set(["unclear", "welcome", "welcome_new", "name_given", "small_talk", "off_topic", "thanks", "ack", "looking_for"]);
+/** LB-28: route a message with a social preamble: answer the rest, greet warmly by name first. */
+async function routeSocial(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn> {
+  const s = socialPreamble(raw, t);
+  if (!s) return routeIntent(state, raw, t, ctx);
+  if (s.name && !state.lead.name) state.lead.name = s.name; // "Hi! Shruti here." (typed in this chat)
+  const restT = norm(s.restRaw);
+  if (!restT.replace(/[^a-z0-9]+/g, "")) return greetIntroReply(state, s);
+  let turn = await routeIntent(state, s.restRaw, restT, ctx);
+  // The rest alone matched nothing real: try the whole message once before the warm reply.
+  if (SOCIAL_FALLBACK.has(turn.intent)) turn = await routeIntent(state, raw, t, ctx);
+  if (SOCIAL_FALLBACK.has(turn.intent)) return greetIntroReply(state, s);
+  const warm = ANSWERS.greetIntro(s.greet ?? "Hi", s.name, s.keeper, nextRot(state, "greet"), s.howAreYou);
+  return { ...turn, reply: `${warm}\n\n${turn.reply}` };
+}
+
 /** LB-13: the answer to the fish-or-food question asked after a pleasantry. */
 function lookingForAnswer(t: string): string | null {
   if (t.split(" ").length > 6 || /\?/.test(t)) return null;
@@ -2125,7 +2227,9 @@ export const INTENT_RULES: readonly IntentRule[] = [
       return priceOrAvailability(state, raw, t, ctx, "price");
     },
   },
-  { id: "available", tier: "faq", faq: "FAQ 1", test: (m) => RE.available.test(m.t), run: ({ state, raw, t, ctx }) => priceOrAvailability(state, raw, t, ctx, "available") },
+  // LB-28: "planning / looking / thinking of / keen to buy ..." is buy intent too (the window + ask, as "want to buy discus").
+  // With a place named ("from Bangalore, looking to buy") the delivery reply (with the SOP) still answers, as before.
+  { id: "available", tier: "faq", faq: "FAQ 1", test: (m) => RE.available.test(m.t) || (isBuyIntent(m.t) && !findPlace(m.t)), run: ({ state, raw, t, ctx }) => priceOrAvailability(state, raw, t, ctx, "available") },
   {
     id: "care_tips", tier: "faq", faq: "Quick tap: care tips",
     test: (m) => RE.care.test(m.t),
@@ -2477,7 +2581,7 @@ async function chatTurn(state: ChatState, raw: string, t: string, ctx: Ctx): Pro
       return contactAck(state);
     }
   }
-  const turn = await routeIntent(state, raw, t, ctx);
+  const turn = await routeSocial(state, raw, t, ctx);
 
   // A plain "no" / "yes" to the ask (only when the message isn't a question of its own).
   const generic = ["unclear", "ack", "off_topic", "offer_declined", "small_talk", "thanks"].includes(turn.intent);
