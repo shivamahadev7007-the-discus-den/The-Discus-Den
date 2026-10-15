@@ -100,8 +100,8 @@ describe("LB-4 · lead alert email content", () => {
   const lead: LeadForAlert = { sessionId: SID, source: "insta", state: leadState() };
   const email = buildLeadAlertEmail(lead, TRANSCRIPT, { to: TO, now: new Date("2026-10-02T19:00:00Z") });
 
-  it("subject: [Lead] New chat lead: <name> — <summary with tags, strains, place>", () => {
-    assert.match(email.subject, /^\[Lead\] New chat lead: Ravi <b>Kumar<\/b> — DOA CLAIM · LONG HOLD · Red Ninja Discus, Yellow Diamonds · Kochi · Discus fish$/);
+  it("subject: [Lead] (?:Website|Instagram|Facebook|YouTube): <name> — <summary with tags, strains, place>", () => {
+    assert.match(email.subject, /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Ravi <b>Kumar<\/b> — DOA CLAIM · LONG HOLD · Red Ninja Discus, Yellow Diamonds · Kochi · Discus fish$/);
     assert.doesNotMatch(email.subject, /[\r\n]/);
   });
 
@@ -141,7 +141,7 @@ describe("LB-4 · lead alert email content", () => {
     s.lead = { name: "Meena" };
     const e = buildLeadAlertEmail({ sessionId: SID, source: "", state: s }, [], { to: TO });
     // LB-19: no valid name + number -> tagged Visitor.
-    assert.match(e.subject, /^\[Visitor\] Website chat: Meena — General enquiry$/);
+    assert.match(e.subject, /^\[Visitor\] (?:Website|Instagram|Facebook|YouTube): Meena — General enquiry$/);
     assert.match(e.text, /Phone\/WhatsApp: not given/);
     assert.match(e.text, /Email: not given/);
   });
@@ -163,7 +163,7 @@ describe("LB-4 · sendLeadAlert modes", () => {
     const body = JSON.parse(String(calls[0]!.init.body));
     assert.equal(body.from, "TDD <alerts@example.com>");
     assert.deepEqual(body.to, [TO]);
-    assert.match(body.subject, /^\[Lead\] New chat lead: /);
+    assert.match(body.subject, /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): /);
     assert.ok(body.text && body.html);
   });
 
@@ -241,7 +241,7 @@ describe("LB-4 · /api/chat sends the email once per completed handoff", () => {
     assert.ok(out.every((o) => o.status === 200));
     assert.equal(calls.length, 1);
     const body = JSON.parse(String(calls[0]!.init.body));
-    assert.match(body.subject, /^\[Lead\] New chat lead: Ravi — /);
+    assert.match(body.subject, /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Ravi — /);
     assert.match(body.text, /Phone\/WhatsApp: \+919845012345/);
     assert.match(body.text, /Visitor: Can I visit the store\?/);
     // LB-19: sent when the chat ends, with the FULL transcript. LB-19 fix (Kiara #2): the
@@ -426,7 +426,7 @@ describe("LB-13/14/15 · pushes and pleasantries never email; a genuine handoff 
     const out = await runChat(deps(fetchImpl), ["hi", "fish", "Connect to Shiva", "can I talk to the owner", "Ravi", "9845012345", "please connect me with him", "put me through", "get me the owner", "thanks", "bye"], "3f2b8c1e-9a4d-4e2f-8b6a-00000000b150");
     assert.ok(out.every((o) => o.status === 200));
     assert.equal(calls.length, 1);
-    assert.match(JSON.parse(String(calls[0]!.init.body)).subject, /^\[Lead\] New chat lead: Ravi/);
+    assert.match(JSON.parse(String(calls[0]!.init.body)).subject, /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Ravi/);
   });
   it("greetings + pushes with no number -> no email while the chat is open", async () => {
     const { calls, fetchImpl } = recorder();

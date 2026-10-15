@@ -106,7 +106,7 @@ describe("LB-7 · alert fires when the lead is actionable", () => {
     await quiet(() => endChat(deps, sid(7001)));
     assert.equal(calls.length, 1);
     const body = JSON.parse(String(calls[0]!.init.body));
-    assert.match(body.subject, /^\[Lead\] New chat lead: Ravi — /);
+    assert.match(body.subject, /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Ravi — /);
     assert.match(body.text, /visitor closed the chat/);
     assert.match(body.text, /Phone\/WhatsApp: \+919845012345/);
     assert.equal(store.leads.get(sid(7001))?.alertStatus, "sent");

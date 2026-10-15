@@ -67,7 +67,7 @@ export function chatHeaderLines(lead: LeadForAlert): string[] {
     `Name:        ${s.lead.name ?? "not given"}`,
     `Phone:       ${s.lead.phone ?? "not given"}`,
     `City:        ${s.lead.city ?? s.lead.stateName ?? "not given"}`,
-    `Source:      ?from=${lead.source || "direct"}`,
+    `Source:      ${sourceLabel(lead.source)}`,
   ];
   if (s.badNumbers) lines.push(`Note:        typed a number that failed the 10-digit mobile check`);
   if (lead.chat) {
@@ -124,7 +124,7 @@ export function formatLeadAlert(lead: LeadForAlert, now: Date = new Date()): str
     `Delivery:    ${l.inShipStates === false ? "not asked (OUTSIDE 8 STATES)" : l.delivery ?? "not sure"}`,
     `Timeline:    ${l.timeline ?? "not sure"}`,
     `Tags:        ${tags}`,
-    `Source:      ?from=${lead.source || "direct"}`,
+    `Source:      ${sourceLabel(lead.source)}`,
     `Interest:    ${interestLine(s)}`,
     `Flags:       ${s.flags.length ? s.flags.join(" · ") : "none"}`,
     `Time:        ${istTime(now)}`,
@@ -172,6 +172,12 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/** Live sign-off (Shiva via Lea, 15 Oct): the chat's source in plain words, for the subject and the body. */
+const SOURCE_LABELS: Record<string, string> = { insta: "Instagram", fb: "Facebook", yt: "YouTube", site: "Website" };
+export function sourceLabel(source: string | null | undefined): string {
+  return SOURCE_LABELS[(source ?? "").trim().toLowerCase()] ?? "Website";
+}
+
 function oneLine(s: string): string {
   return s.replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
 }
@@ -200,13 +206,14 @@ export function buildLeadAlertEmail(
   const email = customerEmailFromTranscript(transcript);
   const summary = leadSummary(s);
   const { tag, likelyGenuine, returning } = chatTag(s);
-  // LB-19: every subject is tagged Lead or Visitor.
+  // LB-19: every subject is tagged Lead or Visitor; the source (Instagram / Website / ...) follows the tag.
+  const channel = sourceLabel(lead.source);
   const subject = oneLine(
     returning
-      ? `[Lead · returning] Website chat: ${name} — ${summary}`
+      ? `[Lead · returning] ${channel}: ${name} — ${summary}`
       : tag === "Lead"
-        ? `[Lead] New chat lead: ${name} — ${summary}`
-        : `[Visitor${likelyGenuine ? " · likely genuine" : ""}] Website chat: ${name} — ${summary}`,
+        ? `[Lead] ${channel}: ${name} — ${summary}`
+        : `[Visitor${likelyGenuine ? " · likely genuine" : ""}] ${channel}: ${name} — ${summary}`,
   ).slice(0, 200);
   const header = chatHeaderLines(lead);
   const card = formatLeadAlert(lead, opts.now ?? new Date());
