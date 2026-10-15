@@ -1004,6 +1004,22 @@ export function unlistedAsk(t: string): UnlistedKind | null {
 async function unlistedFirm(state: ChatState, raw: string, t: string, ctx: Ctx): Promise<Turn | null> {
   const kind = unlistedAsk(t);
   if (!kind) return null;
+  // Kiara, 15 Oct: a size word that is part of a listed product's name ("Blue Diamond Babies") is a
+  // question about that product, not an off-list ask. Strip the matched names and re-check.
+  {
+    const cards = await liveStrains(ctx);
+    const matched = cards ? matchStrains(raw, cards).cards : [];
+    if (matched.length) {
+      let rest = t;
+      for (const c of matched) {
+        for (const w of norm(c.name.replace(/\([^)]*\)/g, " ").replace(/\//g, " ")).split(" ").filter((x) => x.length >= 3)) {
+          const stem = w.replace(/(ies|s)$/, "");
+          rest = rest.replace(new RegExp(String.raw`\b${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\w*`, "g"), " ");
+        }
+      }
+      if (!unlistedAsk(rest.replace(/\s+/g, " "))) return null;
+    }
+  }
   if (kind === "weak" || kind === "inch") {
     // Exact listed match keeps the normal reply ("Blue Diamonds Small", "3 inch Blue Diamond").
     const cards = await liveStrains(ctx);
