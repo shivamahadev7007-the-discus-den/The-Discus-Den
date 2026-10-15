@@ -162,7 +162,7 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
       assert.equal(replies[2], ANSWERS.thanks, "a plain thanks, no 'Discus fish or frozen foods?'");
       assert.equal(sent.length, 1, "exactly one email");
       const s = sent[0]!;
-      assert.match(subjectOf(s), /^\[Lead\] New chat lead: Ravi Kumar/);
+      assert.match(subjectOf(s), /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Ravi Kumar/);
       assert.deepEqual(
         s.transcript.filter((l) => l.role === "user").map((l) => l.text),
         ["What is the price of Blue Diamond?", "I'm Ravi Kumar, 9876500001", "thanks", "How many days will delivery to Bangalore take?"],
@@ -216,7 +216,7 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
         assert.equal((await end(deps, sid(5), { type: "application/json" })).status, 204);
       });
       assert.equal(sent.length, 1);
-      assert.match(subjectOf(sent[0]!), /^\[Visitor\] Website chat: Unnamed visitor/);
+      assert.match(subjectOf(sent[0]!), /^\[Visitor\] (?:Website|Instagram|Facebook|YouTube): Unnamed visitor/);
       assert.equal(sent[0]!.transcript.length, 4);
       assert.equal(sent[0]!.lead.chat?.endReason, "beacon");
       await h.close();
@@ -247,7 +247,7 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
         await end(deps, sid(7));
       });
       const email = buildLeadAlertEmail(sent[0]!.lead, sent[0]!.transcript, { to: "x@example.com" });
-      assert.match(email.subject, /^\[Visitor · likely genuine\] Website chat: Ravi/);
+      assert.match(email.subject, /^\[Visitor · likely genuine\] (?:Website|Instagram|Facebook|YouTube): Ravi/);
       assert.match(email.text, /failed the 10-digit mobile check/);
       assert.equal((await h.chats())[0]!.phone, null);
       await h.close();
@@ -290,10 +290,10 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
       });
       assert.equal(sent.length, 2);
       assert.notEqual(sent[0]!.lead.chat!.id, sent[1]!.lead.chat!.id);
-      assert.match(subjectOf(sent[0]!), /^\[Lead\] New chat lead: Ravi/);
+      assert.match(subjectOf(sent[0]!), /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Ravi/);
       assert.equal(sent[0]!.lead.chat?.endReason, "closing");
       assert.equal(sent[0]!.transcript.length, 6, "chat 1 incl. the post-close 'thanks'");
-      assert.match(subjectOf(sent[1]!), /^\[Visitor\] Website chat: Unnamed visitor/);
+      assert.match(subjectOf(sent[1]!), /^\[Visitor\] (?:Website|Instagram|Facebook|YouTube): Unnamed visitor/);
       const email = buildLeadAlertEmail(sent[1]!.lead, sent[1]!.transcript, { to: "x@example.com" });
       for (const part of [email.subject, email.text, email.html]) assert.doesNotMatch(part, /Ravi|9845012345|98xxxxxx45|earlier chat/i);
       assert.ok(replies[0]!.endsWith(ANSWERS.contactAskPhotos), "asks like for a fresh visitor");
@@ -589,13 +589,13 @@ describe("LB-19 · email content and Resend call", () => {
     assert.equal(new Set(keys).size, 3, "per-chat key: Resend must not dedupe the returning visitor's email");
     assert.match(keys[0]!, /^tdd-chat-[0-9a-f-]{36}$/);
     const body = JSON.parse(String(calls[0]!.init.body)) as { subject: string; text: string };
-    assert.match(body.subject, /^\[Lead\] New chat lead: Ravi/);
+    assert.match(body.subject, /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Ravi/);
     for (const re of [
       /Tag: {9}Lead/,
       /Name: {8}Ravi/,
       /Phone: {7}\+919845012345/,
       /City: {8}Kochi/, // LB-22: the volunteered city ("I live in Kochi") is kept (was its state, Kerala)
-      /Source: {6}\?from=insta/,
+      /Source: {6}Instagram/,
       /Chat started: 08 Oct 2026, 11:30 IST/,
       /Chat ended: {3}08 Oct 2026, 11:41 IST \(closing message after details were collected, then 10 min with no messages\)/,
       /Visitor: I live in Kochi/,
@@ -632,7 +632,7 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
       assert.equal(replies[3], ANSWERS.handoffClose("Arjun"));
       assert.equal(sent.length, 1);
       const email = buildLeadAlertEmail(sent[0]!.lead, sent[0]!.transcript, { to: "x@example.com" });
-      assert.match(email.subject, /^\[Lead\] New chat lead: Arjun/);
+      assert.match(email.subject, /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Arjun/);
       assert.match(email.text, /Phone: {7}\+919845012312/);
       assert.match(email.text, /City: {8}Bangalore/);
       assert.equal(sent[0]!.transcript.length, 8);
@@ -650,7 +650,7 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
       for (const r of replies) assert.doesNotMatch(r, LB22_CLAIM);
       assert.equal(replies[3], ANSWERS.handoffDeclined);
       assert.equal(sent.length, 1);
-      assert.match(subjectOf(sent[0]!), /^\[Visitor[^\]]*\] Website chat: Arjun/);
+      assert.match(subjectOf(sent[0]!), /^\[Visitor[^\]]*\] (?:Website|Instagram|Facebook|YouTube): Arjun/);
       await h.close();
     });
     it("case 3b: an invalid number after the ask -> recheck, never saved; End -> [Visitor]", async () => {
@@ -679,7 +679,7 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
       });
       assert.equal(replies[1], ANSWERS.humanPassed("Priya", 0), "LB-25: details typed in this chat -> passed, no re-ask");
       assert.equal(sent.length, 1);
-      assert.match(subjectOf(sent[0]!), /^\[Lead\] New chat lead: Priya/);
+      assert.match(subjectOf(sent[0]!), /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Priya/);
       await h.close();
     });
     it("LB-24: returning customer types the SAME number in the new chat -> [Lead · returning] (subject) and this chat's name + number in header, card and body", async () => {
@@ -700,7 +700,7 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
       assert.equal(replies[1], ANSWERS.handoffClose("Ravi Kumar"));
       assert.equal(sent.length, 2);
       const email = buildLeadAlertEmail(sent[1]!.lead, sent[1]!.transcript, { to: "x@example.com" });
-      assert.match(email.subject, /^\[Lead · returning\] Website chat: Ravi Kumar/);
+      assert.match(email.subject, /^\[Lead · returning\] (?:Website|Instagram|Facebook|YouTube): Ravi Kumar/);
       assert.match(email.text, /Name: {8}Ravi Kumar\n/);
       assert.match(email.text, /Phone: {7}\+919845012345\n/);
       assert.match(email.text, /TDD CHAT LEAD\nName: {8}Ravi Kumar\nWhatsApp: {4}\+919845012345/, "card matches the subject");
@@ -725,9 +725,9 @@ for (const [label, make] of [["memory store", memoryHarness], ["Postgres store (
       assert.deepEqual(replies, [`${ANSWERS.greetIntro("Hi", "Meena", false, 0)}\n\n${ANSWERS.humanAskPhone("Meena", 0)}`, ANSWERS.privacyNoDetails(0), ANSWERS.handoffClose("Meena")]);
       for (const r of replies) assert.doesNotMatch(r, /Ravi|9845012345|\d{2}x+\d{2}/i);
       assert.equal(sent.length, 2);
-      assert.match(subjectOf(sent[0]!), /^\[Lead\] New chat lead: Ravi/);
+      assert.match(subjectOf(sent[0]!), /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Ravi/);
       const email = buildLeadAlertEmail(sent[1]!.lead, sent[1]!.transcript, { to: "x@example.com" });
-      assert.match(email.subject, /^\[Lead\] New chat lead: Meena/);
+      assert.match(email.subject, /^\[Lead\] (?:Website|Instagram|Facebook|YouTube): Meena/);
       for (const part of [email.subject, email.text, email.html]) assert.doesNotMatch(part, /Ravi|9845012345|98xxxxxx45|earlier chat|returning/i);
       assert.match(email.text, /Phone: {7}\+919123456780/);
       await h.close();

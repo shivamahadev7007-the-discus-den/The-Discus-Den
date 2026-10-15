@@ -549,7 +549,7 @@ describe("handoff flow", () => {
     assert.match(text, /In 8 states: N/);
     assert.match(text, /Tags: {8}hobbyist · first-timer · hot/);
     assert.match(text, /Flags: {7}OUTSIDE 8 STATES · DISCOUNT ASKED/);
-    assert.match(text, /Source: {6}\?from=insta/);
+    assert.match(text, /Source: {6}Instagram/);
     assert.match(text, /02 Oct 2026, 18:54 IST/);
   });
 });

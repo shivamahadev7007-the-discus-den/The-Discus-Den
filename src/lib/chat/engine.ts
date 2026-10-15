@@ -1358,6 +1358,8 @@ export function isCourtesyOnly(text: string): boolean {
 type Pleasantry = "greeting" | "thanks" | "bye" | "new";
 const PLEASANTRY: Array<[Pleasantry, RegExp]> = [
   ["bye", /\b(bye(\s+bye)?|byee+|goodbye|good\s+bye|see\s+(you|u|ya)(\s+(later|soon|again))?|good\s*night|tata|take\s+care|catch\s+you\s+later|cya)\b/g],
+  // Live sign-off (Kiara, 15 Oct): "Thanks, that's all." / "No, nothing else" / "I'm good" is a goodbye, never the fallback.
+  ["bye", /(?:\b(?:no|nope|nah)\b[\s,.!]*)?\b(that'?s\s+(all|it|everything)|thats\s+(all|it)|that\s+is\s+(all|it|everything)|that('?ll|\s+will)\s+be\s+all|nothing\s+(else|more)|no\s+more\s+(questions?|doubts?)|(i'?m|im|i\s+am)\s+(good|done|all\s+set|sorted)|all\s+(good|set|sorted|clear)|got\s+(it|what\s+i\s+needed))(\s+for\s+(now|today))?(\s+(i\s+need(ed)?|i\s+wanted))?\b/g],
   ["thanks", /\b(thanks?(\s+(a\s+lot|so\s+much|very\s+much|again|a\s+ton))?|thank\s+(you|u)(\s+(so|very)\s+much|\s+a\s+lot)?|thanku|thankyou|thx|thnx|thanx|tnx|ty|nandri|dhanyavad|shukriya|much\s+appreciated|appreciate\s+it)\b/g],
   ["new", /\b((i'?m|i\s+am|im|am)\s+(a\s+|an\s+)?(new|beginner|newbie|novice|fresher|starter)(\s+(discus\s+)?(hobbyist|keeper|aquarist|fish\s*keeper|here|to\s+(the\s+)?(discus|hobby|fishkeeping|fish\s+keeping|this\s+hobby|discus\s+keeping)))?|(new|beginner|newbie|novice)\s+(discus\s+)?(hobbyist|keeper|aquarist|fish\s*keeper)(\s+here)?|(beginner|newbie|new)\s+here|new\s+to\s+(this\s+|the\s+)?(discus|hobby|fishkeeping|fish\s+keeping|aquariums?|discus\s+keeping|this)|just\s+(started|starting|getting\s+started)(\s+with\s+discus)?)\b/g],
   ["greeting", /\b(hi+|hello+|helo|hey+|hai|hiya|heya|howdy|vanakkam|namaste|namaskaram|namaskar|good\s+(morning|afternoon|evening|day)|gm|hola|greetings)\b/g],
