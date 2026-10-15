@@ -133,6 +133,13 @@ const ASK_DECLINED: readonly string[] = [
   "Okay. I'm here if you have any other questions.",
   "No problem at all. Feel free to ask anything else.",
 ];
+/** LB-5 firm line, rotated per chat (Kiara/Lea, 15 Oct: never word for word). Same meaning; no prices, no handoff. */
+const UNLISTED_FIRM: readonly string[] = [
+  "What's listed on thediscusden.com/available is everything we have right now, so we can't offer other sizes, ages or prices. Please pick from that page.",
+  "Everything we have at the moment is on thediscusden.com/available, so other sizes, ages or prices aren't possible. Please choose from that page.",
+  "We only have what's shown on thediscusden.com/available right now, and we can't offer other sizes, ages or prices. That page has all our current fish.",
+  "Our current fish are all on thediscusden.com/available. We aren't able to offer sizes, ages or prices beyond what's listed there.",
+];
 const GREET_KEEPER: readonly string[] = [
   "lovely to meet a fellow Discus keeper!",
   "always a pleasure to hear from a fellow Discus keeper!",
@@ -444,8 +451,9 @@ export const ANSWERS = {
    * no "I'll check", no handoff. [PENDING Anita/Shiva sign-off on wording;
    * "for sale" from the suggested text dropped: "sale" is a guard shop-word.]
    */
-  unlistedFirm:
-    "What's listed on thediscusden.com/available is everything we have right now, so we can't offer other sizes, ages or prices. Please pick from that page.",
+  unlistedFirm: UNLISTED_FIRM[0]!,
+  /** The k-th firm line in a chat (k=0 is unlistedFirm); later turns never repeat it word for word. */
+  unlistedFirmRot: (k: unknown = 0): string => composeRot(k, [UNLISTED_FIRM]),
   /** Rule 1/2/3: no loss figures or sources (not on the site). Not verbatim in the pack. */
   noInternalFigures:
     "I can't share that here. Our available page shows what's ready now: thediscusden.com/available. Want me to narrow it down by size or colour?",
