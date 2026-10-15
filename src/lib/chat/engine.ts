@@ -111,7 +111,7 @@ export type ChatState = {
   /** LB-19: LB-15 polite replies given this chat (rotation index). */
   pushFirms?: number;
   /** LB-22/25: next rotation index per reply kind (no reply repeats word for word in a chat). */
-  askRot?: { both?: number; phone?: number; name?: number; later?: number; passed?: number; privacy?: number; decline?: number; greet?: number };
+  askRot?: { both?: number; phone?: number; name?: number; later?: number; passed?: number; privacy?: number; decline?: number; greet?: number; firm?: number };
 };
 
 export function newChatState(): ChatState {
@@ -1037,7 +1037,7 @@ async function unlistedFirm(state: ChatState, raw: string, t: string, ctx: Ctx):
     }
   }
   state.pendingOffer = null;
-  return { reply: ANSWERS.unlistedFirm, intent: "unlisted_firm" };
+  return { reply: ANSWERS.unlistedFirmRot(nextRot(state, "firm")), intent: "unlisted_firm" };
 }
 
 // ---------------------------------------------------------------------------
