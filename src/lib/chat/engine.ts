@@ -368,7 +368,11 @@ export function matchStrains(text: string, cards: StrainCard[]): StrainMatch {
       const full = matched.length === distinct.length;
       const uniqueRare = matched.some((w) => (freq.get(w) ?? 0) === 1 && w.length >= 5);
       const sharedRare = matched.some((w) => w.length >= 6);
-      if (full || uniqueRare || sharedRare) {
+      // A distinctive word shared by a few cards ("panda" on Red and Yellow Panda Eagles)
+      // still counts, and a named colour that fits the card narrows it down.
+      const sharedName = matched.some((w) => w.length >= 5 && (freq.get(w) ?? 0) <= 3);
+      const colourBacked = msgColours.length > 0 && colours.some((c) => msgColours.includes(c)) && matched.some((w) => w.length >= 4);
+      if (full || uniqueRare || sharedRare || sharedName || colourBacked) {
         bestFull = full || bestFull === true;
         bestN = Math.max(bestN, matched.length);
       }
