@@ -24,13 +24,26 @@ describe("Yellow Panda is found", () => {
   it("bare panda lists both panda cards", () => {
     assert.deepEqual(names("panda discus").sort(), ["Red Panda Eagles", "Yellow Panda Eagles"]);
   });
-  it("a colour no panda card has still matches nothing", () => {
-    assert.deepEqual(names("do you have green panda"), []);
+  it("a colour no panda card has still shares the panda cards (never 'not listed')", () => {
+    assert.deepEqual(names("do you have green panda").sort(), ["Red Panda Eagles", "Yellow Panda Eagles"]);
+  });
+  it("one name word on its own ('eagles') gets the cards, not 'didn't catch that'", async () => {
+    const r = await respond(null, "eagles", { catalog });
+    assert.match(r.reply, /Red Panda Eagles/);
+    assert.match(r.reply, /Yellow Panda Eagles/);
+  });
+  it("a strain we truly don't list still gets the not-listed reply", async () => {
+    const r = await respond(null, "do you have leopard?", { catalog });
+    assert.equal(r.intent, "strain_not_listed");
   });
   it("the chat reply shows Yellow Panda Eagles with its price, not 'isn't on our available page'", async () => {
     const r = await respond(null, "Do you have Yellow Panda discus?", { catalog });
     assert.match(r.reply, /Yellow Panda Eagles/);
     assert.match(r.reply, /3,500/);
     assert.doesNotMatch(r.reply, /isn't on our available page/i);
+  });
+  it("a plural colour ('turquoises') is still a colour ask", async () => {
+    const r = await respond(null, "turquoises", { catalog: { strains: async () => [{ name: "Galaxy Turquoises", size: "2.5 inch", priceText: "₹1,200", priceValue: 1200, available: true, description: "" }] as never, foods: catalog.foods } });
+    assert.match(r.reply, /Galaxy Turquoises/);
   });
 });

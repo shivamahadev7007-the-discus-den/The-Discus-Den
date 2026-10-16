@@ -41,7 +41,6 @@ describe("Real off-list asks still get the firm line", () => {
   for (const m of [
     "do you have smaller blue diamond babies?",
     "any coin size blue diamonds?",
-    "do you have baby red discus?",
     "can I get juvenile panda discus?",
     "any fry available?",
   ]) {
@@ -50,4 +49,14 @@ describe("Real off-list asks still get the firm line", () => {
       assert.equal(r.intent, "unlisted_firm", r.reply);
     });
   }
+});
+
+// B-53 (Shiva, 16 Oct): one matching word means share the match. "baby" matches the listed
+// Blue Diamond Babies even though the colour differs, so it's shown instead of the firm line.
+describe("A size word that is a listed name shares the match", () => {
+  it('"do you have baby red discus?" shows Blue Diamond Babies', async () => {
+    const r = await ask("do you have baby red discus?");
+    assert.notEqual(r.intent, "unlisted_firm", r.reply);
+    assert.match(r.reply, /Blue Diamond Babies/);
+  });
 });
