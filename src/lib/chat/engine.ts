@@ -436,7 +436,20 @@ export function filterCards(text: string, cards: StrainCard[]): StrainCard[] | n
 
 function cardLine(c: StrainCard): string {
   const parts = [c.name, c.size].filter(Boolean).join(", ");
-  return `• ${parts}, ${c.priceText} per piece${c.description ? `: ${c.description}` : ""}`;
+  return `• ${parts}, ${c.priceText} per piece${c.description ? `: ${c.description}` : ""}${c.terms ? ` ${c.terms}` : ""}`;
+}
+
+/**
+ * B-53 follow-up (Lea, 16 Oct): shipping and volume-discount lines follow the cards' own conditions.
+ * Every card pick-up only / no discount -> those lines are dropped; a mix -> a short note instead.
+ */
+function shipLine(cards: StrainCard[]): string | null {
+  if (cards.length && cards.every((c) => c.noShipping)) return null;
+  return cards.some((c) => c.noShipping) ? `${ANSWERS.shippingExtra} Cards marked store pick-up only don't ship.` : ANSWERS.shippingExtra;
+}
+function discountLine(cards: StrainCard[]): string | null {
+  if (cards.length && cards.every((c) => c.noDiscount)) return null;
+  return cards.some((c) => c.noDiscount) ? `${VOLUME_DISCOUNT_LINE} Cards marked no discounts are excluded.` : VOLUME_DISCOUNT_LINE;
 }
 
 function foodLine(f: FoodItem): string {
@@ -799,14 +812,15 @@ async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx
     .filter((w) => !w.split(" ").every((x) => chosenWords.has(singular(x))));
   if (match.cards.length && !unmatchedVocab.length) {
     for (const c of match.cards) if (!state.interests.includes(c.name)) state.interests.push(c.name);
-    const lines = match.cards.slice(0, 5).map(cardLine).join("\n");
-    const extra = [ANSWERS.shippingExtra, VOLUME_DISCOUNT_LINE];
+    const shown = match.cards.slice(0, 5);
+    const lines = shown.map(cardLine).join("\n");
+    const extra = [shipLine(shown), discountLine(shown)].filter((x): x is string => !!x);
     if (match.bundled) {
       state.pendingOffer = null; // LB-6 D2
       return { reply: join(lines, extra.join(" "), ANSWERS.bundledVariant), intent: `${kind}_strain` };
     }
     state.pendingOffer = null;
-    return { reply: join(lines, extra.join(" ")), intent: `${kind}_strain` };
+    return { reply: extra.length ? join(lines, extra.join(" ")) : lines, intent: `${kind}_strain` };
   }
 
   // Named a discus strain that isn't on the page right now.
@@ -844,7 +858,7 @@ async function priceOrAvailability(state: ChatState, raw: string, t: string, ctx
   const head = kind === "price" ? `${PER_PIECE_LINE} ${ANSWERS.availableIntro}` : ANSWERS.availableIntro;
   state.pendingOffer = "narrow";
   return {
-    reply: join(`${head}\n${list.map(cardLine).join("\n")}`, `${VOLUME_DISCOUNT_LINE}\n${ANSWERS.availableOutro}`),
+    reply: join(`${head}\n${list.map(cardLine).join("\n")}`, [discountLine(list), ANSWERS.availableOutro].filter(Boolean).join("\n")),
     intent: filtered ? `${kind}_filtered` : `${kind}_list`,
   };
 }
@@ -891,7 +905,8 @@ async function stockAnswer(state: ChatState, raw: string, t: string, ctx: Ctx): 
     for (const c of match.cards) if (!state.interests.includes(c.name)) state.interests.push(c.name);
     // LB-6 (Shiva, 3 Oct): status only, then the site steps (+ volume line when buying several). No handoff.
     state.pendingOffer = null;
-    const outro = SEVERAL.test(t) ? `${ANSWERS.stockOutro} ${VOLUME_DISCOUNT_LINE}` : ANSWERS.stockOutro;
+    const dl = discountLine(match.cards.slice(0, 5));
+    const outro = SEVERAL.test(t) && dl ? `${ANSWERS.stockOutro} ${dl}` : ANSWERS.stockOutro;
     return { reply: join(match.cards.slice(0, 5).map(stockLine).join("\n"), outro, SITE_STEPS), intent: "stock_strain" };
   }
   // A strain the site doesn't list: no count, ever.

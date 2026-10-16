@@ -30,6 +30,10 @@ export type StrainCard = {
   available: boolean;
   /** Pieces the site lists for this card (its qty cap). Undefined = not listed / couldn't read. */
   stock?: number;
+  /** B-53 follow-up: the card's own conditions line, exactly as shown ("Minimum 5. Store pick-up only. No shipping. No discounts."). */
+  terms?: string;
+  noShipping?: boolean;
+  noDiscount?: boolean;
 };
 
 export type SiteInfo = { owner: string | null };
@@ -93,6 +97,8 @@ function articles(html: string): string[] {
   return html.match(/<article\b[\s\S]*?<\/article>/gi) ?? [];
 }
 
+const TERMS_RE = /\b(minimum \d+|store pick-?up only|no shipping|no discounts?)\b/i;
+
 const PRICE_RE = /^₹\s?(\d{1,3}(?:,\d{2,3})*|\d+)$/;
 
 function parsePrice(seg: string): number | null {
@@ -134,7 +140,9 @@ export function parseAvailableHtml(html: string): StrainCard[] {
         ? descCandidate
         : "";
     const price = priceIdx >= 0 ? parsePrice(segs[priceIdx]!)! : 0;
+    const terms = segs.filter((x) => TERMS_RE.test(x)).join(" ").trim();
     out.push({
+      ...(terms ? { terms, noShipping: /\b(no shipping|pick-?up only)\b/i.test(terms), noDiscount: /\bno discounts?\b/i.test(terms) } : {}),
       name,
       size,
       description,
