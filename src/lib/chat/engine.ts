@@ -311,7 +311,9 @@ const STRAIN_WORDS = [
 // ---------------------------------------------------------------------------
 
 function singular(w: string): string {
-  if (w.length > 4 && w.endsWith("es") && !w.endsWith("ses")) return w.slice(0, -2);
+  if (w.length > 4 && w.endsWith("ies")) return w.slice(0, -3) + "y"; // babies -> baby
+  // B-53: only drop "es" after x/z/ch/sh ("boxes"); "turquoises" -> "turquoise", "eagles" -> "eagle".
+  if (w.length > 4 && /(x|z|ch|sh)es$/.test(w)) return w.slice(0, -2);
   if (w.length > 3 && w.endsWith("s")) return w.slice(0, -1);
   return w;
 }
@@ -351,6 +353,9 @@ export function matchStrains(text: string, cards: StrainCard[]): StrainMatch {
     for (const w of seen) freq.set(w, (freq.get(w) ?? 0) + 1);
   }
 
+  // Shiva, 16 Oct (B-53): if the colour rules out every card ("green panda"), still share the
+  // name matches rather than saying not listed.
+  const collect = (strictColour: boolean) => {
   const hits: Array<{ k: CardKeys; full: boolean; n: number }> = [];
   for (const k of keys) {
     let bestFull: boolean | null = null;
@@ -364,17 +369,24 @@ export function matchStrains(text: string, cards: StrainCard[]): StrainMatch {
       const matched = distinct.filter((w) => msg.has(w));
       if (!matched.length) continue;
       // Colour consistency: if the visitor named a colour, it must fit the card.
-      if (msgColours.length && colours.length && !colours.some((c) => msgColours.includes(c))) continue;
+      if (strictColour && msgColours.length && colours.length && !colours.some((c) => msgColours.includes(c))) continue;
       const full = matched.length === distinct.length;
       const uniqueRare = matched.some((w) => (freq.get(w) ?? 0) === 1 && w.length >= 5);
       const sharedRare = matched.some((w) => w.length >= 6);
-      if (full || uniqueRare || sharedRare) {
+      // Shiva, 16 Oct (B-53): even one name word must surface the matching cards, never "not listed".
+      // Colour-only names (e.g. "Albino Platinum") keep the stricter rule so "blue" alone stays a filter.
+      const nameWord = nonColour.length > 0;
+      if (full || uniqueRare || sharedRare || nameWord) {
         bestFull = full || bestFull === true;
         bestN = Math.max(bestN, matched.length);
       }
     }
     if (bestFull !== null) hits.push({ k, full: bestFull, n: bestN });
   }
+  return hits;
+  };
+  let hits = collect(true);
+  if (!hits.length && msgColours.length) hits = collect(false);
   // Keep the cards that matched the most of the visitor's words
   // ("snakeskin" -> both snakeskin cards; "panthera snakeskin" -> just one).
   const maxN = Math.max(0, ...hits.map((h) => h.n));
@@ -1901,7 +1913,7 @@ function guaranteeAnswer(state: ChatState, t: string): Turn {
 }
 
 const sizeAskRe = /(\d+(?:\.\d+)?)\s*(?:"|inch|inches)|\b(small|big|large|adult|juvenile)\s+(ones?|fish|discus|size)\b/;
-const hasColour = (t: string) => COLOURS.some((c) => new RegExp(`\\b${c}\\b`).test(t));
+const hasColour = (t: string) => COLOURS.some((c) => new RegExp(`\\b${c}(e?s)?\\b`).test(t)); // B-53: plurals ("turquoises")
 
 export const INTENT_RULES: readonly IntentRule[] = [
   // ---- 1. safety ----
@@ -2327,7 +2339,17 @@ export const INTENT_RULES: readonly IntentRule[] = [
   {
     id: "unclear", tier: "fallback", faq: "FAQ 24",
     test: () => true,
-    run: ({ state, t }) => {
+    run: async ({ state, raw, t, ctx }) => {
+      // Shiva, 16 Oct (B-53): a word from a listed name ("eagles", "cover") that nothing above caught
+      // still shows the matching cards instead of "didn't catch that". Kept to short fish-ish messages
+      // so "help me write a cover letter" isn't read as Red Cover.
+      if (words(raw).length <= 4 || /\b(discus|fish|fishes|pair|piece)\b/.test(t)) {
+        const cards = await liveStrains(ctx);
+        if (cards && matchStrains(raw, cards).cards.length) {
+          const hit = await priceOrAvailability(state, raw, t, ctx, "strain");
+          if (hit) return hit;
+        }
+      }
       // LB-18 broad fallback (Kiara 987208a, Lea): anything delivery- or timing-ish that nothing
       // else matched gets the location + timing reply instead of "didn't catch that".
       if (isDeliveryIsh(t)) return deliveryTimingAnswer(state, t);
