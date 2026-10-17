@@ -1323,7 +1323,8 @@ describe("C1 · LB-2: availability only, never a quantity (Shiva's ruling, 3 Oct
 });
 
 describe("LB-3 (aligned to LB-6 SOP): quarantine + ship -> Yes, quarantine, SOP, delivery", () => {
-  const CORE = `Yes. ${ANSWERS.quarantine}`;
+  // B-3 (Shiva, 17 Oct): the hold rule is always part of the quarantine-and-ship reply.
+  const CORE = `Yes. ${ANSWERS.quarantine} ${ANSWERS.holding}`;
   for (const m of [
     "I see - you guys quarantine the fish and ship it to me?",
     "do you quarantine the fish before shipping?",
@@ -1334,13 +1335,17 @@ describe("LB-3 (aligned to LB-6 SOP): quarantine + ship -> Yes, quarantine, SOP,
       const r = await one(m);
       assert.equal(r.intent, "quarantine_ship", m);
       assert.equal(r.reply, `${CORE}\n\n${SOP_BLOCK}\n\n${ANSWERS.shipInStates}`, r.reply);
-      assert.doesNotMatch(r.reply, /7 days free|₹100/, "hold line only when asked to keep fish longer");
+      assert.match(r.reply, /7 days free/);
+      assert.match(r.reply, /₹100 per day/);
+      assert.match(r.reply, /day four/);
+      assert.doesNotMatch(r.reply, /saturday|sunday|weekend/i);
       assert.equal(guardReply(r.reply).text, r.reply, m);
     });
   }
-  it("asked to keep the fish longer -> adds the 7-days-free / ₹100 line", async () => {
+  it("asked to keep the fish longer -> the 7-days-free / ₹100 line appears once", async () => {
     const r = await one("will you keep the fish with you and deliver later?");
-    assert.ok(r.reply.startsWith(`${CORE} ${ANSWERS.holding}`), r.reply);
+    assert.ok(r.reply.startsWith(CORE), r.reply);
+    assert.equal(r.reply.split("7 days free").length, 2, r.reply);
     assert.ok(r.reply.includes(SOP_BLOCK));
     assert.ok(r.reply.endsWith(ANSWERS.shipInStates), r.reply);
   });
@@ -1589,7 +1594,9 @@ describe("LB-6: steer to the site instead of a handoff", () => {
   it("how does delivery work -> SOP", async () => {
     const r = await one("how does delivery work?");
     assert.ok(r.reply.includes(ANSWERS.sop), r.reply);
-    assert.match(r.reply, /fasted for two days/);
+    assert.match(r.reply, /hold them for three days/);
+    assert.match(r.reply, /Shipping happens on day four\./);
+    assert.doesNotMatch(r.reply, /saturday|sunday|weekend/i);
     assert.match(r.reply, /half the amount as advance/);
     assert.doesNotMatch(r.reply, /7 days free|₹100/);
   });
@@ -1668,7 +1675,7 @@ describe("Kiara LB-6 run (7a73e2c): regressions", () => {
     ["C3", ["will you ship to Kolkata"], is(outOfAreaReply("Kolkata"))],
     ["C4", ["when will my fish ship"], is(SHIP_SOP)],
     ["C5", ["how do I pay, full amount first?"], is(ANSWERS.payAdvance)],
-    ["C6", ["do you quarantine before shipping?"], is(`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine}\n\n${SOP_BLOCK}\n\n${ANSWERS.shipInStates}`)],
+    ["C6", ["do you quarantine before shipping?"], is(`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine} ${ANSWERS.holding}\n\n${SOP_BLOCK}\n\n${ANSWERS.shipInStates}`)],
     ["C7", ["can I pick up from the station?"], is(STATION_SOP)],
     ["C8", ["Chennai, can I collect from store?"], is(asAsk(ANSWERS.pickup))], // LB-19 fix: ask replaces the offer
     ["C9", ["can you keep my fish for 2 weeks? I'm travelling"], is(ANSWERS.holding)],

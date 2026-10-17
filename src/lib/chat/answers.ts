@@ -358,7 +358,7 @@ export const ANSWERS = {
    */
   sopIntro: "If you're outside Chennai or ordering for the first time, here's how it works:",
   sop:
-    "1. Your fish are moved to a separate customer holding tank.\n2. They're fasted for two days, and you get an update from us every day during this time.\n3. Shipping happens on day three, most likely the coming Saturday or Sunday.\n4. Shipping is by train. We give you a railway agent's contact: you can collect the fish at the station by speaking with the agent, or have them ported from the station to your place.\n5. Payment: half the amount as advance once your fish are moved to the holding tank, and the balance on shipping day, before dispatch.",
+    "1. Your fish are moved to a separate customer holding tank.\n2. We hold them for three days (they're fasted before travel), and you get an update from us every day during this time.\n3. Shipping happens on day four.\n4. Shipping is by train. We give you a railway agent's contact: you can collect the fish at the station by speaking with the agent, or have them ported from the station to your place.\n5. Payment: half the amount as advance once your fish are moved to the holding tank, and the balance on shipping day, before dispatch.",
   /** LB-6 B3 (Lea, 3 Oct): "can I order on chat?" -> plain "No" + the site steps (audit exemption). */
   orderInChat: `No, orders go through our website, not this chat. ${SITE_STEPS}`,
   /** LB-6 B6: how the customer knows the request went through (site wording: "Request placed"). */
