@@ -2161,15 +2161,13 @@ export const INTENT_RULES: readonly IntentRule[] = [
       // LB-6: the SOP is the normal flow; the 7-days-free line only when the
       // customer asks us to keep the fish longer.
       const delivery = shippingAnswer(state, t, { sop: false });
-      const parts: string[] = [`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine}`];
-      if (KEEP_LONGER.test(t) || RE.holdingBeyond.test(t)) {
-        let hold: string = ANSWERS.holding;
-        if (RE.holdingBeyond.test(t)) {
-          addFlag(state, "LONG HOLD");
-          hold = `${ANSWERS.holding} ${ANSWERS.holdingBeyond}`;
-          state.pendingOffer = "handoff";
-        }
-        parts[0] += ` ${hold}`;
+      // B-3 (Shiva, 17 Oct): the quarantine-and-ship reply always carries the hold rule
+      // (7 days free, then ₹100 a day per purchase).
+      const parts: string[] = [`${ANSWERS.quarantineShipYes} ${ANSWERS.quarantine} ${ANSWERS.holding}`];
+      if (RE.holdingBeyond.test(t)) {
+        addFlag(state, "LONG HOLD");
+        parts[0] += ` ${ANSWERS.holdingBeyond}`;
+        state.pendingOffer = "handoff";
       }
       const outside = delivery.intent !== "ship_in_states" && delivery.intent !== "ship_general";
       if (!outside && !CHENNAI.test(t)) parts.push(SOP_BLOCK);
