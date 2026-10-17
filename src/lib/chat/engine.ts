@@ -180,6 +180,20 @@ function addFlag(state: ChatState, flag: LeadFlag): void {
   if (!state.flags.includes(flag)) state.flags.push(flag);
 }
 
+/**
+ * B-52 (Shiva, 17 Oct 2026): keep the capitals a customer typed in their name ("Kiara YT" stays
+ * "Kiara YT", "McDonald" stays "McDonald"). Only all-lowercase words get a capital first letter,
+ * and a name typed fully in capitals is shown in normal case.
+ */
+function nameCase(s: string): string {
+  const letters = s.replace(/[^\p{L}]/gu, "");
+  if (letters.length > 4 && letters === letters.toUpperCase() && letters !== letters.toLowerCase()) return titleCase(s.toLowerCase());
+  return s
+    .split(/\s+/)
+    .map((w) => (w && w === w.toLowerCase() ? titleCase(w) : w))
+    .join(" ");
+}
+
 function titleCase(s: string): string {
   return s
     .split(/\s+/)
@@ -564,7 +578,7 @@ export function parseName(raw: string): string | null {
   const parts = s.split(/\s+/);
   if (parts.length > 4) return null;
   if (NAME_BLOCK.test(s)) return null;
-  return titleCase(s.toLowerCase());
+  return nameCase(s);
 }
 
 const FOOD_WORD = /\b(frozen|foods?|pellets?|heart\s+mix|bloodworms?|blood\s+worms?|feed|saapadu|unavu|khana)\b/;
@@ -1330,7 +1344,7 @@ export function introName(raw: string): string | null {
   if (words.some((w) => NOT_INTRO_NAME.has(w.toLowerCase()) || NOT_NAME_WORDS.has(w.toLowerCase()) || /ing$/i.test(w))) return null;
   const name = words.join(" ");
   if (NAME_BLOCK.test(name) || findPlace(norm(name)) || strainWordsIn(norm(name)).length) return null;
-  return titleCase(name.toLowerCase());
+  return nameCase(name);
 }
 
 /** LB-22: a volunteered city ("from Bangalore", "I'm in Pune") kept for the email (same rule as the handoff prefill). */
@@ -1480,9 +1494,10 @@ function escapeRe(s: string): string {
 function hereName(raw: string): string | null {
   const m = /^\W*(?:hi+|hello+|helo|hey+|hai|hiya|heya|howdy|vanakkam|namaste|namaskaram|namaskar|greetings|good\s+(?:morning|afternoon|evening|day))(?:\s+(?:there|all|everyone|team|sir|madam))?\W+([A-Za-z][A-Za-z'-]+)\s+here\b/i.exec(raw);
   if (!m) return null;
-  const w = m[1]!.toLowerCase();
+  const typed = m[1]!;
+  const w = typed.toLowerCase();
   if (NOT_INTRO_NAME.has(w) || NOT_NAME_WORDS.has(w) || FILLER_REPLY.test(w) || /ing$/.test(w) || NAME_BLOCK.test(w) || findPlace(w) || strainWordsIn(w).length) return null;
-  return titleCase(w);
+  return nameCase(typed);
 }
 type Social = { greet: string | null; name: string | null; keeper: boolean; howAreYou: boolean; restRaw: string };
 const HOW_ARE_YOU = /\b(?:how\s+(?:is|'s)\s+it\s+going|how'?s\s+it\s+going|how\s+are\s+(?:you|u)(?:\s+doing)?(?:\s+today)?|how\s+have\s+you\s+been|hope\s+(?:you(?:'re|\s+are)\s+)?(?:doing\s+)?(?:well|good|fine))\b/gi;
