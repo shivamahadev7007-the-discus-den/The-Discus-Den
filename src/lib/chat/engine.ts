@@ -255,7 +255,7 @@ const RE = {
     /\b(month|months|\d{2,}\s+days|free\s+for|longer|extend|beyond|waive|discount\s+on)\b/,
   goatHeart: /\b(goat\s*heart|ghm)\b/,
   food:
-    /\b(food|foods|pellets?|frozen|bloodworms?|blood\s+worms?|heart\s+mix|beef\s*heart|buffalo\s*heart|bhm|provit|feed|what\s+to\s+feed|saapadu)\b/,
+    /\b(food|foods|pellets?|frozen|bloodworms?|blood\s+worms?|heart\s+mix|beef\s*heart|buffalo\s*heart|bhm|provit|feed|what\s+to\s+feed|saapadu|dewormer|growth\s+enhancer|deworming\s+(food|mix|pack)|medicated\s+(food|ghm|bhm|bloodworms?|mix|feed|frozen|pack))\b/,
   pairSingle: /\b(pair\s+or\s+(a\s+)?single|single\s+or\s+(a\s+)?pair|buy\s+a\s+pair|should\s+i\s+(get|buy)\s+(a\s+)?(pair|single|group))\b/,
   perPiece: /\b(per\s+(fish|piece|pair|pc)|each|for\s+a\s+pair|pair\s+price|price\s+for\s+(a\s+)?pair|is\s+(that|this|the\s+price)\s+(for\s+)?(one|a\s+pair))\b/,
   beginner: /\b(beginner|beginners|starter|first\s+(time|discus|tank)|new\s+to\s+discus|easy\s+(strain|discus|one)|hardy|good\s+for\s+(a\s+)?(beginner|start))\b/,
@@ -941,12 +941,44 @@ async function ownerAnswer(state: ChatState, ctx: Ctx): Promise<Turn> {
   return { reply: ownerReply(owner ?? OWNER_FALLBACK), intent: "owner" };
 }
 
-async function foodAnswer(state: ChatState, ctx: Ctx, goat: boolean): Promise<Turn> {
+/**
+ * Shiva, 17 Oct 2026: the Medicated shelf (GHM / BHM / Bloodworm - Dewormer, 100 g) and BHM with
+ * Growth Enhancer. "medicated" means dewormer (the site's own section heading). An ask with one of
+ * these words gets those exact packs; a growth or BHM+ ask never gets a dewormer pack, and a
+ * dewormer ask never gets the plain or growth mix.
+ */
+const DEWORM_ASK = /\b(dewormer|deworm\w*|medicated|medicine\s+(food|mix))\b/;
+const GROWTH_ASK = /\b(growth|enhancer)\b|\bbhm\s*(\+|plus\b)/;
+function specialFoods(raw: string, t: string, frozen: FoodItem[]): FoodItem[] | null {
+  const low = raw.toLowerCase();
+  const deworm = DEWORM_ASK.test(t);
+  const growth = GROWTH_ASK.test(low) || GROWTH_ASK.test(t);
+  if (!deworm && !growth) return null;
+  const bases: RegExp[] = [];
+  if (/\b(ghm|goat)\b/.test(t)) bases.push(/goat|\bghm\b/i);
+  if (/\b(bhm|buffalo|beef)\b/.test(t)) bases.push(/buffalo|\bbhm\b/i);
+  if (/\bblood\s*worms?\b/.test(t)) bases.push(/blood\s*worm/i);
+  const items = frozen.filter((f) => {
+    if (!f.packs.length) return false;
+    const isDeworm = /deworm|medicated/i.test(f.name);
+    const isGrowth = /growth/i.test(f.name);
+    if (deworm ? !isDeworm : !isGrowth || isDeworm) return false;
+    return !bases.length || bases.some((b) => b.test(f.name));
+  });
+  return items.length ? items : null;
+}
+
+async function foodAnswer(state: ChatState, ctx: Ctx, goat: boolean, raw = "", t = ""): Promise<Turn> {
   let foods: { frozen: FoodItem[] | null; pellets: FoodItem[] | null };
   try {
     foods = await ctx.catalog.foods();
   } catch {
     foods = { frozen: null, pellets: null };
+  }
+  const special = specialFoods(raw, t, foods.frozen ?? []);
+  if (special) {
+    state.pendingOffer = null;
+    return { reply: `${special.map(foodLine).join("; ")}. ${ANSWERS.foodOutro}`, intent: "food_special_live" };
   }
   if (goat) {
     const ghm = foods.frozen?.find((f) => /goat\s*heart/i.test(f.name));
@@ -2191,8 +2223,8 @@ export const INTENT_RULES: readonly IntentRule[] = [
       return { reply: ANSWERS.holding, intent: "holding" };
     },
   },
-  { id: "goat_heart", tier: "faq", faq: "FAQ 16", test: (m) => RE.goatHeart.test(m.t), run: ({ state, ctx }) => foodAnswer(state, ctx, true) },
-  { id: "food", tier: "faq", faq: "FAQ 15", test: (m) => RE.food.test(m.t), run: ({ state, ctx }) => foodAnswer(state, ctx, false) },
+  { id: "goat_heart", tier: "faq", faq: "FAQ 16", test: (m) => RE.goatHeart.test(m.t), run: ({ state, raw, t, ctx }) => foodAnswer(state, ctx, true, raw, t) },
+  { id: "food", tier: "faq", faq: "FAQ 15", test: (m) => RE.food.test(m.t), run: ({ state, raw, t, ctx }) => foodAnswer(state, ctx, false, raw, t) },
   {
     // LB-11: "should I buy a pair?" -> prices are per piece, choose the quantity on the card (+ steps).
     id: "how_many_to_buy", tier: "faq", faq: "FAQ 4",
